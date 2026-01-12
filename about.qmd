@@ -1,0 +1,38 @@
+---
+title: ""
+message: false
+warning: false
+---
+
+# Packages
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(gsheet)
+library(dplyr)
+```
+
+
+```{r}
+ma2 <- gsheet2tbl("https://docs.google.com/spreadsheets/d/1j0WZXtJsSMN1MAbmkppnCMnr5d9LnsxV/edit?usp=sharing&ouid=112586075609758894128&rtpof=true&sd=true")
+```
+
+```{r}
+ma2 <- ma2 %>%
+  mutate(
+    pd_90 = planting_date + 90)
+```
+
+```{r}
+
+
+library(httr)
+library(jsonlite)
+
+```
+
+```{r}
+
+```
+
