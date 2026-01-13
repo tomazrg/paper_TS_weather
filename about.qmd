@@ -16,6 +16,9 @@ library(dplyr)
 
 ```{r}
 ma2 <- gsheet2tbl("https://docs.google.com/spreadsheets/d/1j0WZXtJsSMN1MAbmkppnCMnr5d9LnsxV/edit?usp=sharing&ouid=112586075609758894128&rtpof=true&sd=true")
+
+
+max(ma2$planting_date)
 ```
 
 ```{r}
@@ -48,13 +51,21 @@ library(purrr)
 # Configurações do usuário
 # ===========================
 # Variáveis diárias desejadas (ajuste conforme sua análise)
+
+
 daily_vars <- c(
   "temperature_2m_max",
   "temperature_2m_min",
+  "temperature_2m_mean",
+  "apparent_temperature_max",
+  "apparent_temperature_min",
   "precipitation_sum",
-  "windspeed_10m_max",
-  "shortwave_radiation_sum"
+  "rain_sum",
+  "et0_fao_evapotranspiration",
+  "relative_humidity_2m_mean"
 )
+
+
 
 # Fuso horário da agregação diária: use "UTC" para evitar ambiguidade
 era5_timezone <- "UTC"   # ou "auto"
@@ -289,7 +300,114 @@ print(head(era5_all, 10))
 # ===========================
 outfile <- paste0("era5_daily_ma2_", format(Sys.Date(), "%Y%m%d"), ".csv")
 write.csv(era5_all, outfile, row.names = FALSE)
-message("Arquivo salvo em: ", normalizePath(outfile))
+message("Arquivo salvo em: ", normalizePath(outfile))\
+
+
+
+
+  era5_ma2 = era5_all %>% 
+  left_join(ma2_clean, by = c("lat", "lon")) %>%   # chave exata
+  arrange(lat, lon)
+
+era5_ma2 = era5_ma2 %>% 
+mutate(epidemic = case_when(
+    mean_sev <= 25 ~ 0,
+   mean_sev > 25  ~ 1))
+
+era5_ma2$days = rep(0:90, 254)
+
+era5_ma2 |> 
+  filter(days <= 40) %>% 
+  ggplot(aes(as.factor(epidemic), temperature_2m_max))+
+   geom_boxplot( width = 0.3, alpha = 0.5, fill= 'white')
+
 
 ```
 
+
+
+
+```{r}
+library(ecmwfr)
+
+# use o token UUID que você tem no perfil do CDS
+ecmwfr::wf_set_key(key = "655b5fbf-438f-4d8a-ba15-eb91e6ff20b0", user = "ecmwfr")
+
+library(ecmwfr)
+
+request <- list(
+  dataset_short_name = "reanalysis-era5-single-levels",
+  product_type = "reanalysis",
+  variable = "2m_temperature",
+  year  = "2021",
+  month = "01",
+  day   = "01",
+  time  = "12:00",
+  data_format = "netcdf",
+  target = "teste_era5.nc"
+)
+
+ecmwfr::wf_request(
+  request  = request,
+  user     = "ecmwfr",
+  transfer = TRUE,
+  path     = ".",
+  verbose  = TRUE
+)
+```
+
+```{r}
+
+library(httr)
+
+start_date <- "2024-01-01"
+end_date   <- "2024-12-31"
+lat = c(ma2$lat)
+lat = ma2$lat
+lon =  ma2$longitude
+base_url <- "https://archive-api.open-meteo.com/v1/era5"
+
+query_list <- list(
+  latitude   = lat,
+  longitude  = lon,
+  start_date = start_date,
+  end_date   = end_date,
+  daily = paste(
+    c(
+      "temperature_2m_max",
+      "temperature_2m_min",
+      "relative_humidity_2m_mean",
+      "precipitation_sum"
+    ),
+    collapse = ","
+  ),
+  timezone = "America/Sao_Paulo"
+)
+
+res <- httr::GET(base_url, query = query_list)
+stop_for_status(res)
+
+dat_list <- jsonlite::fromJSON(content(res, as = "text", encoding = "UTF-8"))
+
+PF_era5_2024_std <- as.data.frame(dat_list$daily) %>%
+  mutate(DATE = as.Date(time)) %>%
+  transmute(
+    source = "ERA5",
+    DATE,
+    T2MAX       = temperature_2m_max,
+    T2MIN       = temperature_2m_min,
+    RH2M        = relative_humidity_2m_mean,
+    PRECTOTCORR = precipitation_sum
+  )
+
+WX_all_2024 <- bind_rows(
+  PF_station_2024,
+  PF_nasa_2024_std,
+  PF_era5_2024_std
+) %>%
+  mutate(
+    T2M_MEAN = (T2MAX + T2MIN) / 2
+  ) %>%
+  arrange(source, DATE)
+
+```
