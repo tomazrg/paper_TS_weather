@@ -185,6 +185,9 @@ fit <- brm(
   control = list(adapt_delta = 0.95, max_treedepth = 12)
 )
 
+pp_check(fit, type="dens_overlay")
+bayes_R2(fit)
+predict(fit)
 print(fit)
 summary(fit)
 
@@ -220,6 +223,8 @@ band_effects_one_var <- function(var, cb_template, fit, at_probs = AT_PROBS,
   # exposure grid for crosspred
   x_pool <- attr(cb_template, "range") # might be NULL; safer to use data-based quantiles
   # derive at values from wx_use pooled distribution
+  
+  
   x_all <- wx_use %>% pull(.data[[var]])
   at_vals <- as.numeric(quantile(x_all, probs = at_probs, na.rm = TRUE))
   names(at_vals) <- paste0("p", at_probs*100)
