@@ -1,0 +1,91 @@
+---
+title: "lixo"
+format: html
+editor: visual
+---
+
+# Script from Emerson
+```{r}
+library(ecmwfr)
+
+# use o token UUID que você tem no perfil do CDS
+ecmwfr::wf_set_key(key = "655b5fbf-438f-4d8a-ba15-eb91e6ff20b0", user = "ecmwfr")
+
+library(ecmwfr)
+
+request <- list(
+  dataset_short_name = "reanalysis-era5-single-levels",
+  product_type = "reanalysis",
+  variable = "2m_temperature",
+  year  = "2021",
+  month = "01",
+  day   = "01",
+  time  = "12:00",
+  data_format = "netcdf",
+  target = "teste_era5.nc"
+)
+
+ecmwfr::wf_request(
+  request  = request,
+  user     = "ecmwfr",
+  transfer = TRUE,
+  path     = ".",
+  verbose  = TRUE
+)
+```
+# Script from Emerson
+```{r}
+
+library(httr)
+
+start_date <- "2024-01-01"
+end_date   <- "2024-12-31"
+lat = c(ma2$lat)
+lat = ma2$lat
+lon =  ma2$longitude
+base_url <- "https://archive-api.open-meteo.com/v1/era5"
+
+query_list <- list(
+  latitude   = lat,
+  longitude  = lon,
+  start_date = start_date,
+  end_date   = end_date,
+  daily = paste(
+    c(
+      "temperature_2m_max",
+      "temperature_2m_min",
+      "relative_humidity_2m_mean",
+      "precipitation_sum"
+    ),
+    collapse = ","
+  ),
+  timezone = "America/Sao_Paulo"
+)
+
+res <- httr::GET(base_url, query = query_list)
+stop_for_status(res)
+
+dat_list <- jsonlite::fromJSON(content(res, as = "text", encoding = "UTF-8"))
+
+PF_era5_2024_std <- as.data.frame(dat_list$daily) %>%
+  mutate(DATE = as.Date(time)) %>%
+  transmute(
+    source = "ERA5",
+    DATE,
+    T2MAX       = temperature_2m_max,
+    T2MIN       = temperature_2m_min,
+    RH2M        = relative_humidity_2m_mean,
+    PRECTOTCORR = precipitation_sum
+  )
+
+WX_all_2024 <- bind_rows(
+  PF_station_2024,
+  PF_nasa_2024_std,
+  PF_era5_2024_std
+) %>%
+  mutate(
+    T2M_MEAN = (T2MAX + T2MIN) / 2
+  ) %>%
+  arrange(source, DATE)
+
+```
