@@ -364,7 +364,7 @@ DF_VAR    <- 4      # flexibilidade na dimensão de exposição (ns)
 DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
 SEPARATOR <- LAG_MAX
 
-VARS <- c("rain")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
+VARS <- c("tmax")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
 
 LAG_BAND_A <- 0:40
 LAG_BAND_B <- 41:LAG_MAX
