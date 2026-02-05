@@ -525,7 +525,7 @@ tt$rho.c
 ```
 
 ```{r}
-var <- "tmean"
+var <- "rain"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -558,7 +558,7 @@ mf <- cp$matfit     # matriz: rows = grid, cols = lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
-colsA <- which(lag_idx %in% 0:40)
+colsA <- which(lag_idx %in% 41:70)
 
 # efeito cumulativo para CADA temperatura do grid
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
@@ -571,8 +571,8 @@ rr_sum <- data.frame(
 )
 
 rr_sum %>% 
- # filter(tmean >=25) %>% 
- #filter(tmean >=5) %>% 
+  #filter(tmean >=25) %>% 
+ filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=RR_med)) +
   geom_hline(yintercept = 1, linetype=2) +
@@ -582,6 +582,8 @@ ggplot(aes(x=tmean, y=RR_med)) +
        title="Efeito cumulativo de precipitacao na janela 60–70 dias") +
   theme_bw()
 
+```
+```{r}
 # monte a fórmula com os blocos presentes
 cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
 fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
@@ -614,7 +616,7 @@ get_or_band <- function(fit, var, cb_template, band = 0:40) {
 
   x_all <- wx_use[[var]]
   P50 <- as.numeric(quantile(x_all, 0.50, na.rm=TRUE))
-  P75 <- as.numeric(quantile(x_all, 0.95, na.rm=TRUE))
+  P75 <- as.numeric(quantile(x_all, 0.75, na.rm=TRUE))
 
   cp <- dlnm::crosspred(cb_template, coef = beta, vcov = V,
                         at = c(P50, P75), cen = P50, bylag = 1)
@@ -685,27 +687,8 @@ ggplot(or_curve_t, aes(x, OR)) +
   labs(x = "Temperatura média (°C)", y = "OR (P75 vs P50, acumulado 0–40)",
        title = "Curva OR condicional — Temperatura") +
   theme_bw()
-
-
-
-
-
-
-drop_block <- function(fit_full, block_regex) {
-  cfml <- formula(fit_full)
-  terms <- attr(terms(cfml), "term.labels")
-  keep <- grep(block_regex, terms, invert = TRUE, value = TRUE)
-  f_new <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(keep, collapse=" + ")))
-  glmmTMB(f_new, data = dat, family = beta_family(link="logit"))
-}
-
-fit_no_rain  <- drop_block(fit_sel, "^cb_rain_")
-fit_no_tmean <- drop_block(fit_sel, "^cb_tmean_")
-fit_no_vpd   <- drop_block(fit_sel, "^cb_vpd_")
-
-anova(fit_sel, fit_no_rain)   # LRT para contribuição de rain
-AIC(fit_sel, fit_no_rain, fit_no_tmean, fit_no_vpd)
 ```
+
 
 ```{r}
 # --------- FUNÇÃO PARA CALCULAR EFEITO CUMULADO EM BANDAS -------------------
