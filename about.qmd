@@ -516,11 +516,198 @@ t = predict(fit_tmb, newdata = dat, type = "response")
 
 
 dat2 = dat
-dat$t = t
+dat2$t = t
+
+
+tt = epi.ccc(dat2$sev,dat2$t)
+tt$rho.c
+
+```
+
+```{r}
+var <- "tmean"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 0:40)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR
+)
+
+rr_sum %>% 
+ # filter(tmean >=25) %>% 
+ #filter(tmean >=5) %>% 
+ #filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=RR_med)) +
+  geom_hline(yintercept = 1, linetype=2) +
+  geom_smooth() +
+  labs(x="Precipitacao (mm)",
+       y="Razão de odds relativa (P75 vs P50, lags 60–70)",
+       title="Efeito cumulativo de precipitacao na janela 60–70 dias") +
+  theme_bw()
+
+# monte a fórmula com os blocos presentes
+cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
+fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
+
+fit_sel <- glmmTMB::glmmTMB(
+  fml_sel, data = dat,
+  family = glmmTMB::beta_family(link = "logit")
+)
+summary(fit_sel)
+
+library(DHARMa)
+res <- simulateResiduals(fit_sel, n = 1000)
+plot(res)
 
 
 
 
+
+
+
+
+
+get_or_band <- function(fit, var, cb_template, band = 0:40) {
+  cf <- coef(summary(fit))$cond[,1]
+  vc <- vcov(fit)$cond
+
+  pref <- paste0("^cb_", var, "_")
+  beta <- cf[grep(pref, names(cf))]
+  V    <- vc [grep(pref, rownames(vc)), grep(pref, colnames(vc))]
+
+  x_all <- wx_use[[var]]
+  P50 <- as.numeric(quantile(x_all, 0.50, na.rm=TRUE))
+  P75 <- as.numeric(quantile(x_all, 0.95, na.rm=TRUE))
+
+  cp <- dlnm::crosspred(cb_template, coef = beta, vcov = V,
+                        at = c(P50, P75), cen = P50, bylag = 1)
+
+  mf <- cp$matfit
+  lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+  cols <- which(lag_idx %in% band)
+  eta  <- sum(mf[2, cols], na.rm = TRUE)
+  OR   <- exp(eta)
+  c(eta = eta, OR = OR, P50 = P50, P75 = P75)
+}
+
+or_rain_A <- get_or_band(fit_sel, "rain",  cb_templates[["rain"]],  band = 0:40)
+or_tmean_A<- get_or_band(fit_sel, "tmean", cb_templates[["tmean"]], band = 0:40)
+or_vpd_A  <- get_or_band(fit_sel, "vpd",   cb_templates[["vpd"]],   band = 0:40)
+
+or_rain_B <- get_or_band(fit_sel, "rain",  cb_templates[["rain"]],  band = 41:LAG_MAX)
+or_tmean_B<- get_or_band(fit_sel, "tmean", cb_templates[["tmean"]], band = 41:LAG_MAX)
+or_vpd_B  <- get_or_band(fit_sel, "vpd",   cb_templates[["vpd"]],   band = 41:LAG_MAX)
+
+
+
+sev_base <- mean(predict(fit_sel, type = "response"))
+
+to_pp <- function(OR, sev0 = sev_base) {
+  sev1 <- plogis(qlogis(sev0) + log(OR))
+  c(sev0 = sev0, sev1 = sev1, delta_pp = 100*(sev1 - sev0))
+}
+
+pp_rain_A  <- to_pp(or_rain_A["OR"])
+pp_tmean_A <- to_pp(or_tmean_A["OR"])
+pp_vpd_A   <- to_pp(or_vpd_A["OR"])
+
+pp_rain_B  <- to_pp(or_rain_B["OR"])
+pp_tmean_B <- to_pp(or_tmean_B["OR"])
+pp_vpd_B   <- to_pp(or_vpd_B["OR"])
+
+
+
+
+
+plot_or_curve <- function(fit, var, cb_template, band = 0:40) {
+  cf <- coef(summary(fit))$cond[,1]
+  vc <- vcov(fit)$cond
+  pref <- paste0("^cb_", var, "_")
+  beta <- cf[grep(pref, names(cf))]
+  V    <- vc [grep(pref, rownames(vc)), grep(pref, colnames(vc))]
+  x_all <- wx_use[[var]]
+  grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01), na.rm=TRUE))))
+  P50   <- as.numeric(quantile(x_all, 0.50, na.rm=TRUE))
+
+  cp <- dlnm::crosspred(cb_template, coef = beta, vcov = V,
+                        at = grid, cen = P50, bylag = 1)
+  mf <- cp$matfit
+  lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+  cols <- which(lag_idx %in% band)
+  eta  <- apply(mf[, cols, drop = FALSE], 1, sum)
+  dplyr::tibble(x = grid, OR = exp(eta))
+}
+
+or_curve_t <- plot_or_curve(fit_sel, "tmean", cb_templates[["tmean"]], band = 0:40)
+ggplot(or_curve_t, aes(x, OR)) +
+  geom_hline(yintercept = 1, linetype = 2) +
+  geom_line(linewidth = 1) +
+  labs(x = "Temperatura média (°C)", y = "OR (P75 vs P50, acumulado 0–40)",
+       title = "Curva OR condicional — Temperatura") +
+  theme_bw()
+
+
+
+
+
+
+drop_block <- function(fit_full, block_regex) {
+  cfml <- formula(fit_full)
+  terms <- attr(terms(cfml), "term.labels")
+  keep <- grep(block_regex, terms, invert = TRUE, value = TRUE)
+  f_new <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(keep, collapse=" + ")))
+  glmmTMB(f_new, data = dat, family = beta_family(link="logit"))
+}
+
+fit_no_rain  <- drop_block(fit_sel, "^cb_rain_")
+fit_no_tmean <- drop_block(fit_sel, "^cb_tmean_")
+fit_no_vpd   <- drop_block(fit_sel, "^cb_vpd_")
+
+anova(fit_sel, fit_no_rain)   # LRT para contribuição de rain
+AIC(fit_sel, fit_no_rain, fit_no_tmean, fit_no_vpd)
+```
+
+```{r}
 # --------- FUNÇÃO PARA CALCULAR EFEITO CUMULADO EM BANDAS -------------------
 
 get_dlnm_cumulative_glmmtmb <- function(var,
@@ -609,67 +796,17 @@ quantile(wx_use$vpd, probs = c(0.50, 0.75), na.rm = TRUE)
 quantile(wx_use$rain, probs = c(0.50, 0.75), na.rm = TRUE)
 
 
+dat2 %>% 
+  ggplot(aes(sev,t))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  scale_x_continuous(breaks=c(0, 0.25, 0.50,0.75,1.00))+
+  scale_y_continuous(breaks=c(0, 0.25, 0.50,0.75,1.00))
 ```
 
-```{r}
-var <- "rain"
-cb  <- cb_templates[[var]]
+# .#############
 
-cf  <- coef(summary(fit_tmb))$cond[,1]
-vc  <- vcov(fit_tmb)$cond
 
-prefix <- paste0("cb_", var, "_")
-idx <- grepl(prefix, names(cf))
-
-beta   <- cf[idx]
-vc_sub <- vc[idx, idx]
-
-# valores para curva completa
-x_all   <- wx_use[[var]]
-grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
-
-# referência (P50) usada como centragem
-P50 <- quantile(x_all, 0.50, na.rm=TRUE)
-
-cp <- crosspred(
-  cb,
-  coef = beta,
-  vcov = vc_sub,
-  at   = grid,
-  cen  = P50,
-  bylag = 1
-)
-
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
-
-lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-
-colsA <- which(lag_idx %in% 41:70)
-
-# efeito cumulativo para CADA temperatura do grid
-etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
-
-RR <- exp(etaA)
-
-rr_sum <- data.frame(
-  tmean = grid,
-  RR_med = RR
-)
-
-rr_sum %>% 
-  #filter(tmean >=25) %>% 
-  filter(tmean >=5) %>% 
-  #filter(tmean >=0.66) %>%
-ggplot(aes(x=tmean, y=RR_med)) +
-  geom_hline(yintercept = 1, linetype=2) +
-  geom_smooth() +
-  labs(x="Precipitacao (mm)",
-       y="Razão de odds relativa (P75 vs P50, lags 60–70)",
-       title="Efeito cumulativo de precipitacao na janela 60–70 dias") +
-  theme_bw()
-
-```
 
 
 ## BRM model (Beta Bayesian Hierarchical)
