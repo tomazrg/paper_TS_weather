@@ -390,8 +390,8 @@ ends <- read_csv("data/targetspot_assessment_endpoints_80_85_90dap.csv", show_co
 stopifnot(END_DAP %in% unique(ends$end_dap))
 
 end_use <- ends |>
-  filter(end_dap == END_DAP) |>
-  select(epi_id, assessment_date_assumed)
+  dplyr::filter(end_dap == END_DAP) |>
+  dplyr::select(epi_id, assessment_date_assumed)
 
 epi_use <- epi |>
   inner_join(end_use, by = "epi_id") |>
@@ -488,7 +488,7 @@ names(X_list) <- VARS
 X <- reduce(X_list, left_join, by = "epi_id")
 
 dat <- epi_use |>
-  select(epi_id, sev, siteyear, year, location, state, lat, lon, planting_date, assessment_date_assumed) |>
+dplyr::select(epi_id, sev, siteyear, year, location, state, lat, lon, planting_date, assessment_date_assumed) |>
   left_join(X, by = "epi_id")
 
 ```
@@ -518,7 +518,7 @@ t = predict(fit_tmb, newdata = dat, type = "response")
 dat2 = dat
 dat2$t = t
 
-
+library(epiR)
 tt = epi.ccc(dat2$sev,dat2$t)
 tt$rho.c
 
@@ -567,14 +567,16 @@ RR <- exp(etaA)
 
 rr_sum <- data.frame(
   tmean = grid,
-  RR_med = RR
-)
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
 
 rr_sum %>% 
-  #filter(tmean >=25) %>% 
+ # filter(tmean >=25) %>% 
  filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
-ggplot(aes(x=tmean, y=RR_med)) +
+ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 1, linetype=2) +
   geom_smooth() +
   labs(x="Precipitacao (mm)",
@@ -583,6 +585,8 @@ ggplot(aes(x=tmean, y=RR_med)) +
   theme_bw()
 
 ```
+
+
 ```{r}
 # monte a fórmula com os blocos presentes
 cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
@@ -689,6 +693,153 @@ ggplot(or_curve_t, aes(x, OR)) +
   theme_bw()
 ```
 
+```{r}
+library(MASS)
+library(dplyr)
+library(ggplot2)
+
+# --------------------------
+# 1) Simular coeficientes
+# --------------------------
+set.seed(123)
+nsim <- 1000   # número de simulações
+
+beta_sim <- mvrnorm(n = nsim, mu = beta, Sigma = vc_sub)
+
+# --------------------------
+# 2) Função para calcular RR acumulado
+# --------------------------
+compute_rr <- function(beta_vec){
+  cp_sim <- crosspred(
+    cb,
+    coef = beta_vec,
+    vcov = vc_sub,   # pode manter vc_sub
+    at   = grid,
+    cen  = P50,
+    bylag = 1
+  )
+
+  mf_sim <- cp_sim$matfit
+  etaA_sim <- apply(mf_sim[, colsA, drop=FALSE], 1, sum)
+  exp(etaA_sim)
+}
+
+# --------------------------
+# 3) Calcular RR para cada simulação
+# --------------------------
+RR_sim_list <- lapply(1:nsim, function(i) {
+  compute_rr(beta_sim[i, ])
+})
+
+# Transformar em tibble longo
+df_sim <- do.call(cbind, RR_sim_list) %>%
+  as.data.frame() %>%
+  mutate(tmean = grid) %>%
+  tidyr::pivot_longer(
+    cols = starts_with("V"),
+    names_to = "sim",
+    values_to = "RR"
+  )
+
+# --------------------------
+# 4) Dataframe com curva média
+# --------------------------
+df_mean <- data.frame(
+  tmean = grid,
+  RR_med = RR
+) %>% 
+  filter(tmean >= 5)
+
+df_sim2 = df_sim %>% 
+  group_by(tmean) %>% 
+  summarise(
+    RR = mean(RR))
+
+df_sim %>% 
+  filter(tmean >= 5) %>%
+  filter(RR <75) %>% 
+ggplot() +
+  geom_smooth(aes(x = tmean, y = RR),
+            color = "black", alpha = 0.5, size = 2) +
+  #geom_smooth(data = df_mean, aes(x = tmean, y = RR_med),
+   #         color = "red", size = 1.2) +
+  geom_hline(yintercept = 1, linetype=2) +
+  labs(x = "Precipitação (mm)",
+       y = "Razão de odds relativa (P75 vs P50, lags 60–70)",
+       title = "Efeito cumulativo de precipitação (com incerteza paramétrica)") +
+  theme_bw()
+
+
+```
+
+
+```{r}
+library(dlnm)
+library(dplyr)
+library(ggplot2)
+
+var <- "rain"
+cb  <- cb_templates[[var]]
+
+# extrair betas e vcov apenas da chuva
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+idx <- grepl(paste0("cb_", var, "_"), names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# referência
+x_all <- wx_use[[var]]
+P50   <- quantile(x_all, 0.50, na.rm = TRUE)
+
+# grid usado para crosspred
+grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+# matriz lag × efeito
+mf <- cp$matfit   # rows = valores de chuva; cols = lags
+
+# Extrair índice do valor mais próximo de 15 mm
+rain_val <- 15
+ix15 <- which.min(abs(grid - rain_val))
+
+# efeito em cada lag para chuva = 15 mm
+eta_lag <- mf[ix15, ]
+
+# razão de odds relativa por lag
+RR_lag <- exp(eta_lag)
+
+df_lag <- data.frame(
+  lag = 0:(length(RR_lag)-1),
+  RR_lag = RR_lag,
+  PERC = (RR_lag-1)*100
+)
+
+#max(df_lag$RR_lag)
+
+df_lag %>% 
+  ggplot() +
+  geom_smooth(aes(x = lag, y = PERC),
+            color = "black", alpha = 0.5, size = 2) +
+  geom_hline(yintercept = 1, linetype = 2) +
+  #geom_point(color = "blue") +
+  labs(
+    x = "Lag (dias antes da avaliação)",
+    y = "Razão de odds relativa",
+    title = "Efeito distribuído da chuva (15 mm) ao longo dos lags (0–70 dias)"
+  ) +
+  theme_bw()
+
+```
 
 ```{r}
 # --------- FUNÇÃO PARA CALCULAR EFEITO CUMULADO EM BANDAS -------------------
