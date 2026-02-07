@@ -493,7 +493,9 @@ dplyr::select(epi_id, sev, siteyear, year, location, state, lat, lon, planting_d
 
 ```
 
-## Beta
+## Framework modeling
+
+### Model fitting
 ```{r}
 
 
@@ -525,7 +527,7 @@ tt$rho.c
 ```
 
 ```{r}
-var <- "rain"
+var <- "vpd"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -573,9 +575,9 @@ rr_sum <- data.frame(
   )
 
 rr_sum %>% 
- # filter(tmean >=25) %>% 
- filter(tmean >=5) %>% 
- #filter(tmean >=0.66) %>%
+  #filter(tmean >=25) %>% 
+ #filter(tmean >=5) %>% 
+ filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 1, linetype=2) +
   geom_smooth() +
@@ -586,7 +588,7 @@ ggplot(aes(x=tmean, y=PERC)) +
 
 ```
 
-
+### Severidade
 ```{r}
 # monte a fórmula com os blocos presentes
 cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
@@ -692,7 +694,7 @@ ggplot(or_curve_t, aes(x, OR)) +
        title = "Curva OR condicional — Temperatura") +
   theme_bw()
 ```
-
+### Simulacao
 ```{r}
 library(MASS)
 library(dplyr)
@@ -772,13 +774,13 @@ ggplot() +
 
 ```
 
-
+### Lag movel
 ```{r}
 library(dlnm)
 library(dplyr)
 library(ggplot2)
 
-var <- "rain"
+var <- "vpd"
 cb  <- cb_templates[[var]]
 
 # extrair betas e vcov apenas da chuva
@@ -809,7 +811,7 @@ cp <- crosspred(
 mf <- cp$matfit   # rows = valores de chuva; cols = lags
 
 # Extrair índice do valor mais próximo de 15 mm
-rain_val <- 15
+rain_val <- 1.5
 ix15 <- which.min(abs(grid - rain_val))
 
 # efeito em cada lag para chuva = 15 mm
@@ -841,6 +843,7 @@ df_lag %>%
 
 ```
 
+### OR para as 2 fases
 ```{r}
 # --------- FUNÇÃO PARA CALCULAR EFEITO CUMULADO EM BANDAS -------------------
 
@@ -937,6 +940,9 @@ dat2 %>%
   scale_x_continuous(breaks=c(0, 0.25, 0.50,0.75,1.00))+
   scale_y_continuous(breaks=c(0, 0.25, 0.50,0.75,1.00))
 ```
+
+
+
 
 # .#############
 
