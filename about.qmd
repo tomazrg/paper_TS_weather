@@ -514,6 +514,11 @@ fit_tmb <- glmmTMB( #fit_tmb
 summary(fit_tmb)
 
 
+```
+
+```{r}
+
+
 t = predict(fit_tmb, newdata = dat, type = "response")
 
 
@@ -523,8 +528,355 @@ dat2$t = t
 library(epiR)
 tt = epi.ccc(dat2$sev,dat2$t)
 tt$rho.c
+```
+#### Tmean
+
+##### 0-40
+```{r}
+var <- "tmean"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 0:40)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
+
+tmean_RR_second =rr_sum %>% 
+  filter(tmean >=25) %>% 
+ #filter(tmean >=5) %>% 
+ #filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=PERC)) +
+  annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "#c40000") +
+  labs(x="Temperature (°C)",
+       y="Relative risk (%)",
+       title = "Second phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14) )
 
 ```
+##### 41-70
+
+```{r}
+var <- "tmean"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 41:70)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
+
+tmean_RR_first = rr_sum %>% 
+  filter(tmean >=25) %>% 
+ #filter(tmean >=5) %>% 
+ #filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=PERC)) +
+annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "#C40000") +
+  labs(x="Temperature (°C)",
+       y="Relative risk (%)",
+       title = "First phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank())
+```
+
+#### Rain
+
+##### 0-40
+```{r}
+var <- "rain"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 0:40)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
+
+rain_RR_second =rr_sum %>% 
+  #filter(tmean >=25) %>% 
+ filter(tmean >=5) %>% 
+ #filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=PERC)) +
+annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "#1E90FF") +
+  labs(x="Precipitation (mm)",
+       y="Relative risk (%)",
+       title = "Second phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14) )
+
+```
+##### 41-70
+
+```{r}
+var <- "rain"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 41:70)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
+
+rain_RR_first = rr_sum %>% 
+  #filter(tmean >=25) %>% 
+ filter(tmean >=5) %>% 
+ #filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=PERC)) +
+  annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "#1E90FF") +
+  labs(x="Precipitation (mm)",
+       y="Relative risk (%)",
+       title = "First phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank())
+```
+
+#### VPD
+
+##### 0-40
+```{r}
+var <- "vpd"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+prefix <- paste0("cb_", var, "_")
+idx <- grepl(prefix, names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# valores para curva completa
+x_all   <- wx_use[[var]]
+grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+# referência (P50) usada como centragem
+P50 <- quantile(x_all, 0.50, na.rm=TRUE)
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+mf <- cp$matfit     # matriz: rows = grid, cols = lags
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+colsA <- which(lag_idx %in% 0:40)
+
+# efeito cumulativo para CADA temperatura do grid
+etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
+
+RR <- exp(etaA)
+
+rr_sum <- data.frame(
+  tmean = grid,
+  RR_med = RR) %>% 
+  mutate(
+    PERC = (RR_med-1)*100
+  )
+
+vpd_RR_second =rr_sum %>% 
+  #filter(tmean >=25) %>% 
+ #filter(tmean >=5) %>% 
+ filter(tmean >=0.66) %>%
+ggplot(aes(x=tmean, y=PERC)) +
+annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "green4") +
+  labs(x="VPD (kPa)",
+       y="Relative risk (%)",
+       title = "Second phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14) )
+
+```
+##### 41-70
 
 ```{r}
 var <- "vpd"
@@ -574,19 +926,958 @@ rr_sum <- data.frame(
     PERC = (RR_med-1)*100
   )
 
-rr_sum %>% 
-  #filter(tmean >=25) %>% 
+vpd_RR_first = rr_sum %>% 
+ # filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-  geom_hline(yintercept = 1, linetype=2) +
-  geom_smooth() +
-  labs(x="Precipitacao (mm)",
-       y="Razão de odds relativa (P75 vs P50, lags 60–70)",
-       title="Efeito cumulativo de precipitacao na janela 60–70 dias") +
-  theme_bw()
+annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "lightgreen", color = "lightgreen", alpha = .7) +
+  annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral", alpha = .7) +
+  geom_hline(yintercept = 0, linetype=2) +
+  geom_smooth(size = 2, colour = "green4") +
+  labs(x="Precipitation (mm)",
+       y="Relative risk (%)",
+       title = "First phase") +
+  theme_bw()+
+  theme(
+    text = element_text(face = "bold", size = 14),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank())
+```
+
+```{r}
+library(patchwork)
+tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
+
+ggsave("fig/RR.png", dpi = 600, width = 10, height = 6)
+```
+
+
+### Lag movel
+
+#### Tmean
+
+```{r}
+library(dlnm)
+library(dplyr)
+library(ggplot2)
+
+var <- "tmean"
+cb  <- cb_templates[[var]]
+
+# extrair betas e vcov apenas da chuva
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+idx <- grepl(paste0("cb_", var, "_"), names(cf))
+
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx]
+
+# referência
+x_all <- wx_use[[var]]
+P50   <- quantile(x_all, 0.50, na.rm = TRUE)
+
+# grid usado para crosspred
+grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
+
+cp <- crosspred(
+  cb,
+  coef = beta,
+  vcov = vc_sub,
+  at   = grid,
+  cen  = P50,
+  bylag = 1
+)
+
+# matriz lag × efeito
+mf <- cp$matfit   # rows = valores de chuva; cols = lags
+
+# Extrair índice do valor mais próximo de 15 mm
+rain_val <- 28
+ix15 <- which.min(abs(grid - rain_val))
+
+# efeito em cada lag para chuva = 15 mm
+eta_lag <- mf[ix15, ]
+
+# razão de odds relativa por lag
+RR_lag <- exp(eta_lag)
+
+df_lag <- data.frame(
+  lag = 0:(length(RR_lag)-1),
+  RR_lag = RR_lag,
+  PERC = (RR_lag-1)*100
+)
+
+#max(df_lag$RR_lag)
+
+df_lag %>% 
+  ggplot() +
+  geom_smooth(aes(x = lag, y = PERC),
+            color = "steelblue", alpha = 0.5, size = 2) +
+  geom_hline(yintercept = 1, linetype = 2) +
+  #geom_point(color = "blue") +
+  labs(
+    x = "Lag (days)",
+    y = "Relative risk (%)") +
+  theme_bw()+
+  theme(
+    
+    text = element_text(face = "bold", size = 14)
+  )
 
 ```
+
+```{r}
+library(dlnm)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# ==============================================================
+# 1) EXTRAIR COEFICIENTES
+# ==============================================================
+
+var <- "tmean"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+idx     <- grepl("^cb_tmean_", names(cf))
+beta    <- cf[idx]
+vc_sub  <- vc[idx, idx]
+
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(vc_sub) == ncol(cb))
+
+# ==============================================================
+# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# ==============================================================
+
+x_all <- wx_use[[var]]
+P50   <- quantile(x_all, 0.50, na.rm = TRUE)
+
+# grid usado pelo DLNM
+grid <- sort(unique(as.numeric(quantile(
+  x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
+))))
+
+# valores desejados para o heatmap (26 a 30 °C)
+#at_vals <- seq(1, 2, length.out = 10000)
+at_vals <- seq(25, 30, length.out = 10000)
+
+# ajustar ao range REAL do grid (evita extrapolação)
+at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
+
+# ==============================================================
+# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# ==============================================================
+
+cp <- crosspred(
+  cb,
+  coef  = beta,
+  vcov  = vc_sub,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# matriz: linhas = valores de tmean; colunas = lags
+mf <- cp$matfit
+
+# criar vetor de lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
+if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+# ==============================================================
+# 4) Converter para RR(lag) e depois % (% change)
+# ==============================================================
+
+RR_mat   <- exp(mf)
+PERC_mat <- (RR_mat - 1) * 100
+
+# pivô para formato tidy
+df_heat <- as.data.frame(PERC_mat)
+colnames(df_heat) <- paste0("lag_", lag_idx)
+df_heat <- df_heat %>%
+  mutate(tmean_val = at_vals) %>%
+  pivot_longer(cols = starts_with("lag_"),
+               names_to = "lag",
+               values_to = "PERC") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
+#     e forçar limites simétricos ao redor de zero:
+lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
+max_abs <- max(abs(lims))
+df_plot <- df_heat %>%
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+
+# 2b) Heatmap + isolinhas
+tmean_movel = df_plot %>% 
+ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
+  # raster interpolado fica mais liso na tela
+  geom_raster(interpolate = TRUE) +
+  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
+  geom_contour(aes(z = PERC), color = "black", size = 0.25,
+               breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
+  # rótulo só na isolinha zero (neutro) para guiar leitura
+  geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
+                    label.padding = unit(0.15, "lines"), size = 3.2) +
+  # paleta perceptual e centrada no 0 (diverging)
+  scale_fill_gradient2(
+    low = "#2c7bb6", mid = "white", high = "#d7191c",
+    midpoint = 0, limits = c(-max_abs, max_abs),
+    oob = squish, name = "RR (%)"
+  ) +
+  # eixos e guias
+  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  labs(
+    x = "Lag (days before rating)",
+    y = "Temperature (°C)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10)
+  )
+
+```
+##### Severity
+```{r}
+
+# Pacotes
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+# Se quiser isolinhas com rótulo: remotes::install_github("teunbrand/ggtextpath")
+# library(ggtextpath) # para geom_textcontour (opcional)
+
+# --------------------------------------------------------------
+# Entradas esperadas já existentes no seu ambiente:
+# - fit_sel         : modelo glmmTMB ajustado com cb_*(tmean, vpd, rain, ...)
+# - cb_templates    : lista com os crossbasis (p.ex., cb_templates[["tmean"]])
+# - wx_use          : lista com séries originais (p.ex., wx_use[["tmean"]])
+# - LAG_MAX         : lag máximo usado ao construir os crossbasis (>= 70)
+# --------------------------------------------------------------
+
+# ------------ 1) Parâmetros do heatmap -------------
+var      <- "tmean"                     # variável-alvo
+cb       <- cb_templates[[var]]         # crossbasis correspondente
+x_all    <- wx_use[[var]]
+P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
+at_vals  <- seq(25, 30, length.out = 1000)
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+
+# ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
+cf <- coef(summary(fit_sel))$cond[, 1]
+vc <- vcov(fit_sel)$cond
+
+pref     <- paste0("^cb_", var, "_")
+idx_beta <- grep(pref, names(cf))
+stopifnot(length(idx_beta) > 0)
+beta     <- cf[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc))
+idx_cols <- grep(pref, colnames(vc))
+V        <- vc[idx_rows, idx_cols, drop = FALSE]
+
+# Checagem de consistência com o crossbasis
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(V) == ncol(cb), ncol(V) == ncol(cb))
+
+# ------------ 3) crosspred em todos os at_vals, lag móvel -------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# Matriz no preditor linear: linhas = tmean (at_vals), colunas = lags
+mf <- cp$matfit
+
+# Recuperar e ordenar os índices de lag
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf)-1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf  <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# Limitar à faixa de interesse (0–70 dias)
+lag_max_plot <- min(70, max(lag_idx))
+keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf           <- mf[, keep_cols, drop = FALSE]
+lag_idx      <- lag_idx[keep_cols]
+
+# ------------ 4) Converter Δη acumulado (0→L) em sev final -------------
+# Baseline: mesmo critério do seu Script 2 (média das predições)
+# >>> Se quiser apenas efeitos fixos, troque pela linha comentada.
+sev_base <- mean(predict(fit_sel, type = "response"))
+# sev_base <- mean(predict(fit_sel, type = "response", re.form = NA))  # apenas FE
+
+# cumsum ao longo do eixo de lag produz o acúmulo 0→L para cada tmean
+mf_cum <- t(apply(mf, 1, cumsum))  # dimensões: length(at_vals) x length(lag_idx)
+
+# Mapear para severidade final (escala 0–1), depois para %
+logit <- function(p) qlogis(p)
+ilogit <- function(x) plogis(x)
+
+SEV_mat <- ilogit(logit(sev_base) + mf_cum) # (0–1)
+SEVpct_mat <- 100 * SEV_mat                 # (0–100%)
+
+# ------------ 5) Data frame "long" para o heatmap -------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+df_sev <- df_sev |>
+  mutate(tmean_val = at_vals) |>
+  pivot_longer(
+    cols = starts_with("lag_"),
+    names_to = "lag",
+    values_to = "SEV_pct"
+  ) |>
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+
+# --------------------------------------------------------------
+# (OPCIONAL) 7) Versão por janelas FIXAS (p.ex., 0–40 e 41–70)
+# Produz uma curva de SEV_final vs tmean para cada janela
+# --------------------------------------------------------------
+
+
+make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
+  cols <- which(lag_idx %in% band)
+  if (length(cols) == 0) return(NA_real_)
+  sum(mf_row_by_lag[cols], na.rm = TRUE)
+}
+
+bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+eta_band <- lapply(bands, function(bd) {
+  apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
+})
+band_df <- bind_rows(lapply(names(eta_band), function(nm) {
+  tibble(
+    tmean_val = at_vals,
+    band      = nm,
+    SEV_pct   = 100 * ilogit(logit(sev_base) + eta_band[[nm]])
+  )
+}), .id = NULL)
+
+sev_tmean = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
+  #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
+  geom_smooth(size = 2, se = F, color = "#c40000") +
+  #scale_color_brewer(palette = "Dark2") +
+  labs(
+    x = "Temperature (°C)",
+    y = "Severity (%)",
+    linetype = "Phases") +
+  theme_bw(base_size = 12) +
+  theme(legend.title = element_text(face = "bold"))
+```
+
+#### Rain
+
+```{r}
+library(dlnm)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# ==============================================================
+# 1) EXTRAIR COEFICIENTES
+# ==============================================================
+
+var <- "rain"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+idx     <- grepl("^cb_rain_", names(cf))
+beta    <- cf[idx]
+vc_sub  <- vc[idx, idx]
+
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(vc_sub) == ncol(cb))
+
+# ==============================================================
+# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# ==============================================================
+
+x_all <- wx_use[[var]]
+P50   <- quantile(x_all, 0.50, na.rm = TRUE)
+
+# grid usado pelo DLNM
+grid <- sort(unique(as.numeric(quantile(
+  x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
+))))
+
+# valores desejados para o heatmap (26 a 30 °C)
+#at_vals <- seq(1, 2, length.out = 10000)
+at_vals <- seq(5, 20, length.out = 10000)
+
+# ajustar ao range REAL do grid (evita extrapolação)
+at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
+
+# ==============================================================
+# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# ==============================================================
+
+cp <- crosspred(
+  cb,
+  coef  = beta,
+  vcov  = vc_sub,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# matriz: linhas = valores de tmean; colunas = lags
+mf <- cp$matfit
+
+# criar vetor de lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
+if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+# ==============================================================
+# 4) Converter para RR(lag) e depois % (% change)
+# ==============================================================
+
+RR_mat   <- exp(mf)
+PERC_mat <- (RR_mat - 1) * 100
+
+# pivô para formato tidy
+df_heat <- as.data.frame(PERC_mat)
+colnames(df_heat) <- paste0("lag_", lag_idx)
+df_heat <- df_heat %>%
+  mutate(tmean_val = at_vals) %>%
+  pivot_longer(cols = starts_with("lag_"),
+               names_to = "lag",
+               values_to = "PERC") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
+#     e forçar limites simétricos ao redor de zero:
+lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
+max_abs <- max(abs(lims))
+df_plot <- df_heat %>%
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+
+# 2b) Heatmap + isolinhas
+rain_movel = df_plot %>% 
+ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
+  # raster interpolado fica mais liso na tela
+  geom_raster(interpolate = TRUE) +
+  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
+  geom_contour(aes(z = PERC), color = "black", size = 0.25,
+               breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
+  # rótulo só na isolinha zero (neutro) para guiar leitura
+  geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
+                    label.padding = unit(0.15, "lines"), size = 3.2) +
+  # paleta perceptual e centrada no 0 (diverging)
+  scale_fill_gradient2(
+    low = "#2c7bb6", mid = "white", high = "#d7191c",
+    midpoint = 0, limits = c(-max_abs, max_abs),
+    oob = squish, name = "RR (%)"
+  ) +
+  # eixos e guias
+  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  labs(
+    x = "Lag (days before rating)",
+    y = "Precipitation (mm)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10)
+  )
+
+```
+
+##### Severity
+```{r}
+
+# Pacotes
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+# Se quiser isolinhas com rótulo: remotes::install_github("teunbrand/ggtextpath")
+# library(ggtextpath) # para geom_textcontour (opcional)
+
+# --------------------------------------------------------------
+# Entradas esperadas já existentes no seu ambiente:
+# - fit_sel         : modelo glmmTMB ajustado com cb_*(tmean, vpd, rain, ...)
+# - cb_templates    : lista com os crossbasis (p.ex., cb_templates[["tmean"]])
+# - wx_use          : lista com séries originais (p.ex., wx_use[["tmean"]])
+# - LAG_MAX         : lag máximo usado ao construir os crossbasis (>= 70)
+# --------------------------------------------------------------
+
+# ------------ 1) Parâmetros do heatmap -------------
+var      <- "rain"                     # variável-alvo
+cb       <- cb_templates[[var]]         # crossbasis correspondente
+x_all    <- wx_use[[var]]
+P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
+at_vals  <- seq(5, 20, length.out = 1000)
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+
+# ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
+cf <- coef(summary(fit_sel))$cond[, 1]
+vc <- vcov(fit_sel)$cond
+
+pref     <- paste0("^cb_", var, "_")
+idx_beta <- grep(pref, names(cf))
+stopifnot(length(idx_beta) > 0)
+beta     <- cf[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc))
+idx_cols <- grep(pref, colnames(vc))
+V        <- vc[idx_rows, idx_cols, drop = FALSE]
+
+# Checagem de consistência com o crossbasis
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(V) == ncol(cb), ncol(V) == ncol(cb))
+
+# ------------ 3) crosspred em todos os at_vals, lag móvel -------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# Matriz no preditor linear: linhas = tmean (at_vals), colunas = lags
+mf <- cp$matfit
+
+# Recuperar e ordenar os índices de lag
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf)-1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf  <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# Limitar à faixa de interesse (0–70 dias)
+lag_max_plot <- min(70, max(lag_idx))
+keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf           <- mf[, keep_cols, drop = FALSE]
+lag_idx      <- lag_idx[keep_cols]
+
+# ------------ 4) Converter Δη acumulado (0→L) em sev final -------------
+# Baseline: mesmo critério do seu Script 2 (média das predições)
+# >>> Se quiser apenas efeitos fixos, troque pela linha comentada.
+sev_base <- mean(predict(fit_sel, type = "response"))
+# sev_base <- mean(predict(fit_sel, type = "response", re.form = NA))  # apenas FE
+
+# cumsum ao longo do eixo de lag produz o acúmulo 0→L para cada tmean
+mf_cum <- t(apply(mf, 1, cumsum))  # dimensões: length(at_vals) x length(lag_idx)
+
+# Mapear para severidade final (escala 0–1), depois para %
+logit <- function(p) qlogis(p)
+ilogit <- function(x) plogis(x)
+
+SEV_mat <- ilogit(logit(sev_base) + mf_cum) # (0–1)
+SEVpct_mat <- 100 * SEV_mat                 # (0–100%)
+
+# ------------ 5) Data frame "long" para o heatmap -------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+df_sev <- df_sev |>
+  mutate(tmean_val = at_vals) |>
+  pivot_longer(
+    cols = starts_with("lag_"),
+    names_to = "lag",
+    values_to = "SEV_pct"
+  ) |>
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+
+# --------------------------------------------------------------
+# (OPCIONAL) 7) Versão por janelas FIXAS (p.ex., 0–40 e 41–70)
+# Produz uma curva de SEV_final vs tmean para cada janela
+# --------------------------------------------------------------
+
+
+make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
+  cols <- which(lag_idx %in% band)
+  if (length(cols) == 0) return(NA_real_)
+  sum(mf_row_by_lag[cols], na.rm = TRUE)
+}
+
+bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+eta_band <- lapply(bands, function(bd) {
+  apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
+})
+band_df <- bind_rows(lapply(names(eta_band), function(nm) {
+  tibble(
+    tmean_val = at_vals,
+    band      = nm,
+    SEV_pct   = 100 * ilogit(logit(sev_base) + eta_band[[nm]])
+  )
+}), .id = NULL)
+
+sev_rain = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
+  #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
+  geom_smooth(size = 2, se = F, colour = "#1E90FF") +
+  #scale_color_brewer(palette = "Dark2") +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Severity (%)",
+    linetype = "Phases") +
+  theme_bw(base_size = 12) +
+  theme(legend.title = element_text(face = "bold"))
+```
+
+#### VPD
+
+```{r}
+library(dlnm)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# ==============================================================
+# 1) EXTRAIR COEFICIENTES
+# ==============================================================
+
+var <- "vpd"
+cb  <- cb_templates[[var]]
+
+cf  <- coef(summary(fit_tmb))$cond[,1]
+vc  <- vcov(fit_tmb)$cond
+
+idx     <- grepl("^cb_vpd_", names(cf))
+beta    <- cf[idx]
+vc_sub  <- vc[idx, idx]
+
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(vc_sub) == ncol(cb))
+
+# ==============================================================
+# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# ==============================================================
+
+x_all <- wx_use[[var]]
+P50   <- quantile(x_all, 0.50, na.rm = TRUE)
+
+# grid usado pelo DLNM
+grid <- sort(unique(as.numeric(quantile(
+  x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
+))))
+
+# valores desejados para o heatmap (26 a 30 °C)
+#at_vals <- seq(1, 2, length.out = 10000)
+at_vals <- seq(0.66, 2, length.out = 10000)
+
+# ajustar ao range REAL do grid (evita extrapolação)
+at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
+
+# ==============================================================
+# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# ==============================================================
+
+cp <- crosspred(
+  cb,
+  coef  = beta,
+  vcov  = vc_sub,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# matriz: linhas = valores de tmean; colunas = lags
+mf <- cp$matfit
+
+# criar vetor de lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
+if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+# ==============================================================
+# 4) Converter para RR(lag) e depois % (% change)
+# ==============================================================
+
+RR_mat   <- exp(mf)
+PERC_mat <- (RR_mat - 1) * 100
+
+# pivô para formato tidy
+df_heat <- as.data.frame(PERC_mat)
+colnames(df_heat) <- paste0("lag_", lag_idx)
+df_heat <- df_heat %>%
+  mutate(tmean_val = at_vals) %>%
+  pivot_longer(cols = starts_with("lag_"),
+               names_to = "lag",
+               values_to = "PERC") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
+#     e forçar limites simétricos ao redor de zero:
+lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
+max_abs <- max(abs(lims))
+df_plot <- df_heat %>%
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+
+# 2b) Heatmap + isolinhas
+vpd_movel = df_plot %>% 
+ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
+  # raster interpolado fica mais liso na tela
+  geom_raster(interpolate = TRUE) +
+  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
+  geom_contour(aes(z = PERC), color = "black", size = 0.25,
+               breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
+  # rótulo só na isolinha zero (neutro) para guiar leitura
+  geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
+                    label.padding = unit(0.15, "lines"), size = 3.2) +
+  # paleta perceptual e centrada no 0 (diverging)
+  scale_fill_gradient2(
+    low = "#2c7bb6", mid = "white", high = "#d7191c",
+    midpoint = 0, limits = c(-max_abs, max_abs),
+    oob = squish, name = "RR (%)"
+  ) +
+  # eixos e guias
+  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  labs(
+    x = "Lag (days before rating)",
+    y = "VPD (kPa)") +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10)
+  )
+
+```
+```{r}
+df_plot2 = df_plot %>% 
+  mutate(
+    phase = case_when(lag >= 0 & lag <=40 ~ "Second",
+                      lag >= 41 & lag <=70 ~ "First"),
+    level = case_when(tmean_val >= 1.5 ~ "High",
+                      tmean_val < 1.5 ~ "Low")
+  ) %>% 
+  group_by(phase,level) %>% 
+  summarise(
+    mean = mean(PERC),
+    low = quantile(PERC,0.025),
+    high = quantile(PERC,0.975)
+    
+  )
+
+
+df_plot2 %>% 
+  ggplot(aes(PERC))+
+  geom_histogram()+
+  facet_wrap(~phase+level)
+```
+
+##### Severity
+```{r}
+
+# Pacotes
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+# Se quiser isolinhas com rótulo: remotes::install_github("teunbrand/ggtextpath")
+# library(ggtextpath) # para geom_textcontour (opcional)
+
+# --------------------------------------------------------------
+# Entradas esperadas já existentes no seu ambiente:
+# - fit_sel         : modelo glmmTMB ajustado com cb_*(tmean, vpd, rain, ...)
+# - cb_templates    : lista com os crossbasis (p.ex., cb_templates[["tmean"]])
+# - wx_use          : lista com séries originais (p.ex., wx_use[["tmean"]])
+# - LAG_MAX         : lag máximo usado ao construir os crossbasis (>= 70)
+# --------------------------------------------------------------
+
+# ------------ 1) Parâmetros do heatmap -------------
+var      <- "vpd"                     # variável-alvo
+cb       <- cb_templates[[var]]         # crossbasis correspondente
+x_all    <- wx_use[[var]]
+P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
+at_vals  <- seq(0.66, 2, length.out = 1000)
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+
+# ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
+cf <- coef(summary(fit_sel))$cond[, 1]
+vc <- vcov(fit_sel)$cond
+
+pref     <- paste0("^cb_", var, "_")
+idx_beta <- grep(pref, names(cf))
+stopifnot(length(idx_beta) > 0)
+beta     <- cf[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc))
+idx_cols <- grep(pref, colnames(vc))
+V        <- vc[idx_rows, idx_cols, drop = FALSE]
+
+# Checagem de consistência com o crossbasis
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(V) == ncol(cb), ncol(V) == ncol(cb))
+
+# ------------ 3) crosspred em todos os at_vals, lag móvel -------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# Matriz no preditor linear: linhas = tmean (at_vals), colunas = lags
+mf <- cp$matfit
+
+# Recuperar e ordenar os índices de lag
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf)-1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf  <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# Limitar à faixa de interesse (0–70 dias)
+lag_max_plot <- min(70, max(lag_idx))
+keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf           <- mf[, keep_cols, drop = FALSE]
+lag_idx      <- lag_idx[keep_cols]
+
+# ------------ 4) Converter Δη acumulado (0→L) em sev final -------------
+# Baseline: mesmo critério do seu Script 2 (média das predições)
+# >>> Se quiser apenas efeitos fixos, troque pela linha comentada.
+sev_base <- mean(predict(fit_sel, type = "response"))
+# sev_base <- mean(predict(fit_sel, type = "response", re.form = NA))  # apenas FE
+
+# cumsum ao longo do eixo de lag produz o acúmulo 0→L para cada tmean
+mf_cum <- t(apply(mf, 1, cumsum))  # dimensões: length(at_vals) x length(lag_idx)
+
+# Mapear para severidade final (escala 0–1), depois para %
+logit <- function(p) qlogis(p)
+ilogit <- function(x) plogis(x)
+
+SEV_mat <- ilogit(logit(sev_base) + mf_cum) # (0–1)
+SEVpct_mat <- 100 * SEV_mat                 # (0–100%)
+
+# ------------ 5) Data frame "long" para o heatmap -------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+df_sev <- df_sev |>
+  mutate(tmean_val = at_vals) |>
+  pivot_longer(
+    cols = starts_with("lag_"),
+    names_to = "lag",
+    values_to = "SEV_pct"
+  ) |>
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+
+# --------------------------------------------------------------
+# (OPCIONAL) 7) Versão por janelas FIXAS (p.ex., 0–40 e 41–70)
+# Produz uma curva de SEV_final vs tmean para cada janela
+# --------------------------------------------------------------
+
+
+make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
+  cols <- which(lag_idx %in% band)
+  if (length(cols) == 0) return(NA_real_)
+  sum(mf_row_by_lag[cols], na.rm = TRUE)
+}
+
+bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+eta_band <- lapply(bands, function(bd) {
+  apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
+})
+band_df <- bind_rows(lapply(names(eta_band), function(nm) {
+  tibble(
+    tmean_val = at_vals,
+    band      = nm,
+    SEV_pct   = 100 * ilogit(logit(sev_base) + eta_band[[nm]])
+  )
+}), .id = NULL)
+
+sev_vpd = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
+  #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
+  geom_smooth(size = 2, se = F, colour = "green4") +
+  #scale_color_brewer(palette = "Dark2") +
+  labs(
+    x = "VPD (kPa)",
+    y = "Severity (%)",
+    linetype = "Phases") +
+  theme_bw(base_size = 12) +
+  theme(legend.title = element_text(face = "bold"))
+```
+
+```{r}
+tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
+
+ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
+```
+
 
 ### Severidade
 ```{r}
@@ -694,6 +1985,114 @@ ggplot(or_curve_t, aes(x, OR)) +
        title = "Curva OR condicional — Temperatura") +
   theme_bw()
 ```
+
+
+```{r}
+# Pacotes
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+
+# ================== ENTRADAS ==================
+# fit_sel: seu glmmTMB com cb_(tmean|vpd|rain)
+# cb_templates[["rain"]]
+# wx_use[["rain"]]
+# LAG_MAX coerente com o cb (>= 70)
+
+# 1) Extrair bloco de RAIN e parâmetros
+var   <- "rain"
+cb    <- cb_templates[[var]]
+x_all <- wx_use[[var]]
+P50   <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+P75   <- as.numeric(quantile(x_all, 0.75, na.rm = TRUE))
+
+cf <- coef(summary(fit_sel))$cond[, 1]
+vc <- vcov(fit_sel)$cond
+pref <- paste0("^cb_", var, "_")
+beta <- cf[grep(pref, names(cf))]
+V    <- vc[grep(pref, rownames(vc)), grep(pref, colnames(vc)), drop = FALSE]
+
+stopifnot(length(beta) == ncol(cb), nrow(V) == ncol(cb))
+
+# Grade de chuva (limita ao observado para evitar extrapolação)
+grid_obs  <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
+rain_vals <- seq(5, 20, length.out = 500)
+rain_vals <- rain_vals[rain_vals >= min(grid_obs) & rain_vals <= max(grid_obs)]
+
+# 2) crosspred com centragem em P50
+cp <- crosspred(cb, coef = beta, vcov = V, at = rain_vals, cen = P50, bylag = 1)
+mf <- cp$matfit  # [|rain_vals| x |lags|] na escala do preditor linear
+
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+ord <- order(lag_idx); mf <- mf[, ord, drop = FALSE]; lag_idx <- lag_idx[ord]
+
+LAG_MAX <- if (exists("LAG_MAX")) LAG_MAX else max(lag_idx)
+keep    <- lag_idx <= LAG_MAX
+mf      <- mf[, keep, drop = FALSE]
+lag_idx <- lag_idx[keep]
+
+# 3) Baseline igual ao do seu manual
+sev_base <- mean(predict(fit_sel, type = "response"))
+logit <- qlogis; ilogit <- plogis
+sev_base_pct <- 100 * sev_base
+
+# 4) Cumulativo por BANDA: 41→L (zera lags < 41 antes do cumsum)
+L0 <- 41L
+mf_band <- mf
+mf_band[, lag_idx < L0] <- 0
+eta_cum_41L <- t(apply(mf_band, 1, cumsum))  # [|rain_vals| x |lags|]
+
+# 5) Converter para ΔSeveridade (pp) em relação ao baseline
+DELTA_pp_41L <- 100 * ilogit(logit(sev_base) + eta_cum_41L) - sev_base_pct
+
+# 6) Data frame "long" para heatmap
+df <- as.data.frame(DELTA_pp_41L)
+colnames(df) <- paste0("lag_", lag_idx)
+df <- df |>
+  mutate(rain = rain_vals) |>
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "DELTA_pp") |>
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+# 7) Heatmap ΔSeveridade (pp) — banda 41→L
+lims <- quantile(df$DELTA_pp, c(0.02, 0.98), na.rm = TRUE)
+max_abs <- max(abs(lims))
+p_band <- ggplot(df, aes(x = lag, y = rain, fill = DELTA_pp)) +
+  geom_raster(interpolate = TRUE) +
+  scale_fill_gradient2(low = "#2c7bb6", mid = "white", high = "#d7191c",
+                       midpoint = 0, limits = c(-max_abs, max_abs),
+                       name = expression(Delta*" severidade (pp)")) +
+  labs(x = "Lag (dias antes da avaliação)", y = "Precipitação (mm)",
+       title = expression(Delta*"Severidade (pp) — acumulado apenas de 41" %->% "L")) +
+  theme_bw(base_size = 12) +
+  theme(panel.grid = element_blank(),
+        axis.title = element_text(face = "bold"))
+p_band
+
+# 8) Checagem de equivalência com o seu manual (P75 vs P50, banda 41→L)
+cp_chk <- crosspred(cb, coef = beta, vcov = V, at = c(P50, P75), cen = P50, bylag = 1)
+mf_chk <- cp_chk$matfit   # 2 x |lags| ; linha 2 = efeito em P75
+lags   <- suppressWarnings(as.integer(gsub("lag","", colnames(mf_chk))))
+if (anyNA(lags)) lags <- 0:(ncol(mf_chk)-1)
+
+eta_band_manual <- sum(mf_chk[2, lags >= L0 & lags <= LAG_MAX], na.rm = TRUE)
+sev1_pp_manual  <- 100 * ilogit(logit(sev_base) + eta_band_manual)
+delta_pp_manual <- sev1_pp_manual - sev_base_pct
+
+# Ponto equivalente na superfície: rain ≈ P75 e L = LAG_MAX
+ix_rain <- which.min(abs(rain_vals - P75))
+ix_L    <- which.max(which(lag_idx <= LAG_MAX))
+delta_pp_surface <- DELTA_pp_41L[ix_rain, ix_L]
+
+cat(sprintf("\nChecagem (banda 41→L) em rain=P75:\nManual : %.6f pp\nSurface: %.6f pp\nDiff   : %.6f pp\n",
+            delta_pp_manual, delta_pp_surface, delta_pp_surface - delta_pp_manual))
+```
+
+
+
 ### Simulacao
 ```{r}
 library(MASS)
@@ -771,75 +2170,6 @@ ggplot() +
        title = "Efeito cumulativo de precipitação (com incerteza paramétrica)") +
   theme_bw()
 
-
-```
-
-### Lag movel
-```{r}
-library(dlnm)
-library(dplyr)
-library(ggplot2)
-
-var <- "vpd"
-cb  <- cb_templates[[var]]
-
-# extrair betas e vcov apenas da chuva
-cf  <- coef(summary(fit_tmb))$cond[,1]
-vc  <- vcov(fit_tmb)$cond
-idx <- grepl(paste0("cb_", var, "_"), names(cf))
-
-beta   <- cf[idx]
-vc_sub <- vc[idx, idx]
-
-# referência
-x_all <- wx_use[[var]]
-P50   <- quantile(x_all, 0.50, na.rm = TRUE)
-
-# grid usado para crosspred
-grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
-
-cp <- crosspred(
-  cb,
-  coef = beta,
-  vcov = vc_sub,
-  at   = grid,
-  cen  = P50,
-  bylag = 1
-)
-
-# matriz lag × efeito
-mf <- cp$matfit   # rows = valores de chuva; cols = lags
-
-# Extrair índice do valor mais próximo de 15 mm
-rain_val <- 1.5
-ix15 <- which.min(abs(grid - rain_val))
-
-# efeito em cada lag para chuva = 15 mm
-eta_lag <- mf[ix15, ]
-
-# razão de odds relativa por lag
-RR_lag <- exp(eta_lag)
-
-df_lag <- data.frame(
-  lag = 0:(length(RR_lag)-1),
-  RR_lag = RR_lag,
-  PERC = (RR_lag-1)*100
-)
-
-#max(df_lag$RR_lag)
-
-df_lag %>% 
-  ggplot() +
-  geom_smooth(aes(x = lag, y = PERC),
-            color = "black", alpha = 0.5, size = 2) +
-  geom_hline(yintercept = 1, linetype = 2) +
-  #geom_point(color = "blue") +
-  labs(
-    x = "Lag (dias antes da avaliação)",
-    y = "Razão de odds relativa",
-    title = "Efeito distribuído da chuva (15 mm) ao longo dos lags (0–70 dias)"
-  ) +
-  theme_bw()
 
 ```
 
