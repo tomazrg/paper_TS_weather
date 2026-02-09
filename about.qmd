@@ -1879,6 +1879,8 @@ ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
 ```
 
 
+
+
 ### Severidade
 ```{r}
 # monte a fórmula com os blocos presentes
