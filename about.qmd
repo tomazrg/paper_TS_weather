@@ -1875,7 +1875,9 @@ sev_vpd = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
 ```{r}
 tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
 
-ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
+ggsave("fig/RR_movel_severity.png", dpi = 600, width = 10, height = 6)
+
+#ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
 ```
 
 
