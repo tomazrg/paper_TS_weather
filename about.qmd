@@ -949,9 +949,7 @@ annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
 ```{r}
 library(patchwork)
 
-tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second+
-
-
+tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
 
 
 ggsave("fig/RR.png", dpi = 600, width = 10, height = 6)
