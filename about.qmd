@@ -496,6 +496,8 @@ dplyr::select(epi_id, sev, siteyear, year, location, state, lat, lon, planting_d
 ## Framework modeling
 
 ### Model fitting
+
+
 ```{r}
 
 
@@ -861,12 +863,11 @@ summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
 library(zoo)
 sum_t_vert <- summarize_year(curves_by_year_tmean, phase="vertical")
 sum_t_horz <- summarize_year(curves_by_year_tmean, phase="horizontal")
-
+sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
+sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
 
 curves_by_year_rain <- rr_by_year("rain", cb_templates[["rain"]], fit_tmb, wx_use, dat)
 curves_by_year_vpd  <- rr_by_year("vpd",  cb_templates[["vpd"]],  fit_tmb, wx_use, dat)
-
-plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="vertical")
 ```
 
 
@@ -949,17 +950,13 @@ rr_by_year_list <- function(var = c("tmean","rain","vpd"),
 
 
 curves_by_year_tmean <- rr_by_year_list(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
+  var = "rain",
+  cb = cb_templates[["rain"]],
   fit = fit_tmb,
   wx_use = wx_use,
   dat = dat
 )
 
-```
-
-
-```{r}
 plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
   d <- purrr::imap_dfr(curves_by_year, function(x, yr){
     tibble::tibble(
@@ -976,9 +973,11 @@ plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
     theme_minimal(base_size = 12)
 }
 
-
+plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="vertical")
 
 ```
+
+
 ```{r}
 impact_p90_p10 <- function(curves_by_year){
   purrr::imap_dfr(curves_by_year, function(x, yr){
@@ -1019,11 +1018,6 @@ curves_by_year_vpd <- rr_by_year_list(
   wx_use = wx_use,
   dat = dat
 )
-
-
-
-impact_p90_p10(curves_by_year_rain)
-
 
 ```
 
