@@ -5,6 +5,7 @@ editor: visual
 ---
 
 # Script from Emerson
+
 ```{r}
 library(ecmwfr)
 
@@ -33,7 +34,9 @@ ecmwfr::wf_request(
   verbose  = TRUE
 )
 ```
+
 # Script from Emerson
+
 ```{r}
 
 library(httr)
@@ -87,5 +90,744 @@ WX_all_2024 <- bind_rows(
     T2M_MEAN = (T2MAX + T2MIN) / 2
   ) %>%
   arrange(source, DATE)
+
+```
+
+# Segunda parte do script inicial para DLNM usando modelagem bayesiana segundo o Script inicial fornecido pelo EMERSON
+
+## BRM model (Beta Bayesian Hierarchical)
+
+```{r}
+
+# ---- Chunk 4: fit brms beta hierarchical model ------------------------------
+cb_terms <- paste(names(dat)[grepl("^cb_", names(dat))], collapse = " + ")
+fml <- as.formula(paste0("sev ~ 1 + (1|siteyear) + ", cb_terms))
+
+priors <- c(
+  prior(normal(0, 0.7), class = "b"),
+  prior(exponential(1), class = "phi"),
+  prior(student_t(3, 0, 2.5), class = "sd")
+)
+
+fit <- brm(
+  formula = fml, data = dat, family = Beta(),
+  prior   = priors,
+  chains  = CHAINS, iter = ITER, cores = CORES,
+  seed = 20251218,
+  control = list(adapt_delta = 0.95, max_treedepth = 12)
+)
+
+print(fit)
+summary(fit)
+
+```
+
+## Cumulated effect to lag bands (A: 0-40; B: 41-LAG_MAX)
+
+```{r}
+
+# ---- Chunk 5: cumulative effects in lag bands --------------------------------
+get_draws_for_prefix <- function(fit, prefix) {
+  draws <- posterior::as_draws_df(fit)
+  cols  <- grep(paste0("^b_", prefix), names(draws), value = TRUE)
+  if (length(cols) == 0) stop("No coefficients for prefix: ", prefix)
+  draws |> dplyr::select(all_of(cols))
+}
+
+band_effects_one_var <- function(var, cb_template, fit, at_probs = AT_PROBS,
+                                 lagA = LAG_BAND_A, lagB = LAG_BAND_B,
+                                 ndraws = NDRAWS) {
+
+  x_all   <- wx_use |> pull(.data[[var]])
+  at_vals <- as.numeric(quantile(x_all, probs = at_probs, na.rm = TRUE))
+  names(at_vals) <- paste0("p", at_probs*100)
+
+  prefix <- paste0("cb_", var, "_")
+  d <- get_draws_for_prefix(fit, prefix)
+
+  if (nrow(d) > ndraws) {
+    set.seed(20251218)
+    d <- d[sort(sample(seq_len(nrow(d)), ndraws)), , drop = FALSE]
+  }
+
+  cb_cols <- grep(paste0("^", prefix), colnames(dat), value = TRUE)
+  cb_cols <- cb_cols[order(as.integer(gsub(paste0("^", prefix), "", cb_cols)))]
+  bnames  <- paste0("b_", cb_cols)
+
+  out <- vector("list", nrow(d))
+
+  for (i in seq_len(nrow(d))) {
+    co <- as.numeric(d[i, bnames])
+
+    cp <- dlnm::crosspred(
+      cb_template,
+      coef = co,
+      vcov = diag(0, nrow = length(co)),
+      at   = at_vals,
+      cen  = at_vals[1],
+      bylag = 1
+    )
+
+    mf <- cp$matfit  # rows: at, cols: lags
+    lag_names <- colnames(mf)
+    lag_idx   <- suppressWarnings(as.integer(gsub("lag", "", lag_names)))
+    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+    r_hi <- 2 # (contraste P75 vs P50; P50 é referência)
+    colsA <- which(lag_idx %in% lagA)
+    colsB <- which(lag_idx %in% lagB)
+
+    dA <- sum(mf[r_hi, colsA], na.rm = TRUE)
+    dB <- sum(mf[r_hi, colsB], na.rm = TRUE)
+
+    out[[i]] <- data.frame(
+      var = var, end_dap = END_DAP, lag_max = LAG_MAX,
+      at_typ = at_vals[1], at_hi = at_vals[2],
+      delta_eta_bandA = dA, delta_eta_bandB = dB,
+      OR_bandA = exp(dA), OR_bandB = exp(dB)
+    )
+  }
+  bind_rows(out)
+}
+
+band_draws <- bind_rows(lapply(VARS, function(v)
+  band_effects_one_var(v, cb_templates[[v]], fit)))
+
+band_summary <- band_draws |>
+  tidyr::pivot_longer(cols = c(delta_eta_bandA, delta_eta_bandB, OR_bandA, OR_bandB),
+                      names_to = "metric", values_to = "value") |>
+  group_by(var, end_dap, lag_max, metric) |>
+  summarise(
+    median = median(value, na.rm = TRUE),
+    lo95   = quantile(value, 0.025, na.rm = TRUE),
+    hi95   = quantile(value, 0.975, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+write_csv(band_draws,   paste0("dlnm_band_effects_draws_END", END_DAP, "_L", LAG_MAX, ".csv"))
+write_csv(band_summary, paste0("dlnm_band_effects_summary_END", END_DAP, "_L", LAG_MAX, ".csv"))
+
+band_summary
+
+```
+
+## Forest plot of ORS per band
+
+```{r}
+
+# ---- Chunk 6: forest plot ----------------------------------------------------
+bs <- band_summary |>
+  filter(metric %in% c("OR_bandA", "OR_bandB")) |>
+  mutate(
+    band = ifelse(metric == "OR_bandA",
+                  "0–40 dias antes do endpoint (desenvolvimento)",
+                  paste0("41–", LAG_MAX, " dias antes (início)")),
+    var = factor(var, levels = c("tmean","vpd"),
+                 labels = c("Temperatura média","VPD"))
+  )
+
+p_forest <- ggplot(bs, aes(x = median, y = var)) +
+  geom_vline(xintercept = 1, linetype = 2, colour = "grey40") +
+  geom_errorbarh(aes(xmin = lo95, xmax = hi95), height = 0.15, linewidth = 0.7) +
+  geom_point(size = 3) +
+  scale_x_log10(breaks = c(0.5, 1, 2, 4), limits = c(0.4, 6)) +
+  facet_wrap(~ band, ncol = 1) +
+  labs(x = "Razão de odds (P75 vs P50)", y = NULL) +
+  theme_bw(base_size = 12) +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(face = "bold"),
+        panel.grid.minor = element_blank())
+
+print(p_forest)
+
+```
+
+## Weights to lag (A band)
+
+```{r}
+
+# ---- Chunk 7: lag weights & composite index ---------------------------------
+get_lag_weights <- function(var, fit, cb_templates, wx_use, dat,
+                            at_probs = c(0.50, 0.75), lagA = 0:40) {
+  cb <- cb_templates[[var]]
+
+  x_all   <- wx_use[[var]]
+  at_vals <- as.numeric(quantile(x_all, probs = at_probs, na.rm = TRUE))
+
+  prefix <- paste0("cb_", var, "_")
+  cb_cols <- grep(paste0("^", prefix), colnames(dat), value = TRUE)
+  cb_cols <- cb_cols[order(as.integer(sub(prefix, "", cb_cols)))]
+  bnames  <- paste0("b_", cb_cols)
+
+  draws <- posterior::as_draws_df(fit)
+  beta_med <- apply(draws[, bnames, drop = FALSE], 2, median)
+  beta_med <- as.numeric(beta_med)
+
+  V0 <- matrix(0, length(beta_med), length(beta_med))
+  cp <- dlnm::crosspred(cb, coef = beta_med, vcov = V0,
+                        at = at_vals, cen = at_vals[1], bylag = 1)
+
+  eff_lag <- as.numeric(cp$matfit[2, ])  # efeito por lag
+
+  w <- eff_lag[lagA + 1]
+  w <- w / sum(abs(w))   # normaliza
+  data.frame(lag = lagA, w = w)
+}
+
+w_t <- get_lag_weights("tmean", fit, cb_templates, wx_use, dat)
+w_v <- get_lag_weights("vpd",   fit, cb_templates, wx_use, dat)
+
+make_index <- function(wx_use, var, weights, END_DAP = END_DAP) {
+  wx_use |>
+    mutate(day = dpp) |>
+    tidyr::crossing(weights) |>   # expande por lag
+    mutate(day_use = END_DAP - lag) |>
+    group_by(epi_id, lag) |>
+    summarise(x = .data[[var]][match(day_use, day)], w = first(w), .groups="drop") |>
+    group_by(epi_id) |>
+    summarise(idx = sum(w * x, na.rm = TRUE), .groups="drop")
+}
+
+idx_t <- make_index(wx_use, "tmean", w_t) |> rename(idx_tmean = idx)
+idx_v <- make_index(wx_use, "vpd",   w_v) |> rename(idx_vpd   = idx)
+
+dat_dec <- dat |>
+  mutate(y20 = as.integer(sev > 0.35)) |>
+  left_join(idx_t, by = "epi_id") |>
+  left_join(idx_v, by = "epi_id") |>
+  mutate(idx = scale(idx_tmean) + scale(idx_vpd))
+
+```
+
+## Logistic model (decision) and probabilities
+
+```{r}
+
+# ---- Chunk 8: logistic model for high severity ------------------------------
+fit20 <- brm(
+  y20 ~ 1 + idx + (1 | siteyear),
+  data = dat_dec,
+  family = bernoulli(link = "logit"),
+  prior = c(
+    prior(normal(0, 1), class = "b"),
+    prior(student_t(3, 0, 2.5), class = "sd")
+  ),
+  chains = CHAINS, iter = ITER, cores = CORES,
+  seed = 20251218, control = list(adapt_delta = 0.95)
+)
+
+summary(fit20)
+
+dat_dec$prob_high <- fitted(fit20, scale = "response")[, "Estimate"]
+summary(dat_dec$prob_high)
+
+```
+
+## Response curve to Tmean (A band)
+
+```{r}
+
+# ---- Chunk 9: response curve for tmean (lag 0-40 cumulative) ----------------
+var  <- "rain"; cb <- cb_templates[[var]]; lagA <- 40:70
+t_all   <- wx_use[[var]]
+at_grid <- sort(unique(as.numeric(quantile(t_all, probs = seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
+cen_val <- as.numeric(quantile(t_all, probs = 0.50, na.rm = TRUE))
+
+prefix <- paste0("cb_", var, "_")
+cb_cols <- grep(paste0("^", prefix), colnames(dat), value = TRUE)
+cb_cols <- cb_cols[order(as.integer(sub(prefix, "", cb_cols)))]
+bnames  <- paste0("b_", cb_cols)
+
+draws   <- posterior::as_draws_df(fit)
+NDRAWS  <- min(600, nrow(draws))
+set.seed(1); idx <- sample(seq_len(nrow(draws)), NDRAWS)
+draws_sub <- draws[idx, bnames, drop = FALSE]
+
+one_draw_rr <- function(beta_vec) {
+  beta_vec <- as.numeric(beta_vec)
+  V0 <- matrix(0, length(beta_vec), length(beta_vec))
+  cp <- dlnm::crosspred(cb, coef = beta_vec, vcov = V0,
+                        at = at_grid, cen = cen_val, bylag = 1)
+  mf <- cp$matfit
+  lag_names <- colnames(mf)
+  lag_idx   <- suppressWarnings(as.integer(gsub("lag", "", lag_names)))
+  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+  colsA <- which(lag_idx %in% lagA)
+  etaA  <- rowSums(mf[, colsA, drop = TRUE], na.rm = TRUE)
+  exp(etaA)  # OR relativa acumulada
+}
+
+RR_mat <- apply(draws_sub, 1, one_draw_rr)
+
+rr_sum <- data.frame(
+  tmean = at_grid,
+  RR_med = apply(RR_mat, 1, median, na.rm = TRUE),
+  RR_lo  = apply(RR_mat, 1, quantile, probs = 0.025, na.rm = TRUE),
+  RR_hi  = apply(RR_mat, 1, quantile, probs = 0.975, na.rm = TRUE)
+)
+
+ggplot(rr_sum, aes(x = tmean, y = RR_med)) +
+  geom_hline(yintercept = 1, linetype = 2) +
+  geom_ribbon(aes(ymin = RR_lo, ymax = RR_hi), alpha = 0.2) +
+  geom_line(linewidth = 1) +
+  labs(x = "Temperatura média (°C)",
+       y = "Razão de odds relativa (P75 vs mediana, lags 0–40)",
+       title = "Efeito cumulativo de temperatura na janela 0–40 dias") +
+  theme_bw()
+
+```
+
+### Esse nao veio do script inicial
+
+```{r}
+
+# ---- Chunk 9: curvas em probabilidade (Δp) e OR, por variável ----------------
+plot_dlnm_prob_and_or <- function(var = c("tmean","vpd"),
+                                  lagA = 0:40,
+                                  ref_prob = 0.50,
+                                  grid_probs = seq(0.05, 0.95, by = 0.01),
+                                  ndraws = 600) {
+  var <- match.arg(var)
+  cb   <- cb_templates[[var]]
+
+  # grade de exposição e referência
+  x_all   <- wx_use[[var]]
+  at_grid <- sort(unique(as.numeric(quantile(x_all, probs = grid_probs, na.rm = TRUE))))
+  ref_val <- as.numeric(quantile(x_all, probs = ref_prob,  na.rm = TRUE))
+
+  # nomes das colunas para os betas dessa variável
+  prefix  <- paste0("cb_", var, "_")
+  cb_cols <- grep(paste0("^", prefix), names(dat), value = TRUE)
+  cb_cols <- cb_cols[order(as.integer(sub(prefix, "", cb_cols)))]
+  bnames  <- paste0("b_", cb_cols)
+
+  # amostras do posterior
+  draws  <- posterior::as_draws_df(fit)
+  nd     <- min(ndraws, nrow(draws))
+  set.seed(1)
+  idx    <- sample(seq_len(nrow(draws)), nd)
+  betas  <- as.data.frame(draws[idx, bnames, drop = FALSE])
+  ints   <- as.numeric(unlist(draws[idx, "b_Intercept"]))
+
+  # helper
+  one_draw <- function(beta_vec, intercept_val) {
+    beta_vec <- as.numeric(beta_vec)
+    V0 <- diag(0, length(beta_vec))
+    cp <- dlnm::crosspred(cb, coef = beta_vec, vcov = V0,
+                          at = at_grid, cen = ref_val, bylag = 1)
+    mf <- cp$matfit  # linhas = valores de x; colunas = lags
+    lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+    colsA <- which(lag_idx %in% lagA)
+
+    # efeito cumulativo relativo (logit), somado em lags da banda
+    eta_rel <- rowSums(mf[, colsA, drop = FALSE], na.rm = TRUE)
+
+    # OR (apenas se quiser inspecionar)
+    OR <- exp(eta_rel)
+
+    # probabilidade prevista relativa à referência:
+    # p_at = logit^{-1}(intercept + eta_rel), p_ref = logit^{-1}(intercept)
+    p_at  <- plogis(intercept_val + eta_rel)
+    p_ref <- plogis(intercept_val + 0)
+
+    # diferença em pontos percentuais (mais interpretável)
+    dp_pp <- 100 * (p_at - p_ref)
+
+    list(p_at = p_at, dp_pp = dp_pp, OR = OR)
+  }
+
+  beta_list <- split(betas, seq_len(nrow(betas)))
+  res_list  <- mapply(one_draw, beta_list, ints, SIMPLIFY = FALSE)
+
+  # empilhar resultados
+  P_mat  <- do.call(cbind, lapply(res_list, `[[`, "p_at"))
+  DP_mat <- do.call(cbind, lapply(res_list, `[[`, "dp_pp"))
+  OR_mat <- do.call(cbind, lapply(res_list, `[[`, "OR"))
+
+  # sumarizar
+  sum_df <- function(M) {
+    data.frame(
+      x   = at_grid,
+      med = apply(M, 1, median,   na.rm = TRUE),
+      lo  = apply(M, 1, quantile, probs = 0.025, na.rm = TRUE),
+      hi  = apply(M, 1, quantile, probs = 0.975, na.rm = TRUE)
+    )
+  }
+
+  out_prob <- sum_df(P_mat)
+  out_dp   <- sum_df(DP_mat)
+  out_or   <- sum_df(OR_mat)
+
+  # rótulos
+  xlab <- if (var == "tmean") "Temperatura média (°C)" else "VPD (kPa)"
+
+  # Plot 1: Δp em pontos percentuais (não fica flat)
+  p1 <- ggplot(out_dp, aes(x, med)) +
+    geom_hline(yintercept = 0, linetype = 2, colour = "grey40") +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
+    geom_line(linewidth = 1) +
+    labs(x = xlab, y = "Δ probabilidade (pontos percentuais)",
+         title = paste0("Efeito cumulativo (lags ", min(lagA), "–", max(lagA),
+                        ") — ", if (var=="tmean") "Temperatura" else "VPD",
+                        " vs referência (", round(ref_val,3), ")")) +
+    theme_bw(base_size = 12)
+
+  # Plot 2: Probabilidade absoluta (com zoom automático no y)
+  y_rng <- range(c(out_prob$lo, out_prob$hi), na.rm = TRUE)
+  y_pad <- diff(y_rng) * 0.1
+  p2 <- ggplot(out_prob, aes(x, med)) +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
+    geom_line(linewidth = 1) +
+    coord_cartesian(ylim = c(y_rng[1] - y_pad, y_rng[2] + y_pad)) +
+    labs(x = xlab, y = "Probabilidade prevista (média Beta)",
+         title = "Probabilidade prevista (com zoom)") +
+    theme_bw(base_size = 12)
+
+  # Plot 3: OR (como no seu RR)
+  p3 <- ggplot(out_or, aes(x, med)) +
+    geom_hline(yintercept = 1, linetype = 2, colour = "grey40") +
+    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2) +
+    geom_line(linewidth = 1) +
+    scale_y_log10() +
+    labs(x = xlab, y = "Odds ratio (rel. à referência)",
+         title = "OR cumulativa (mesma janela de lag)") +
+    theme_bw(base_size = 12)
+
+  list(delta_p = p1, prob_zoom = p2, or = p3,
+       ref_value = ref_val,
+       summaries = list(prob = out_prob, dp = out_dp, or = out_or))
+}
+
+# Exemplos de uso:
+res_t  <- plot_dlnm_prob_and_or("tmean", lagA = 0:40)
+res_v  <- plot_dlnm_prob_and_or("vpd",   lagA = 0:40)
+
+print(res_t$delta_p)   # Δp (p.p.) para temperatura
+print(res_t$prob_zoom) # probabilidade com zoom
+print(res_t$or)        # OR, se quiser comparar
+
+print(res_v$delta_p)
+print(res_v$prob_zoom)
+print(res_v$or)
+
+
+```
+
+# ERA5 desenvolvido por mim para obter os dados climaticos
+
+```{r}
+ma2 <- gsheet2tbl("https://docs.google.com/spreadsheets/d/1j0WZXtJsSMN1MAbmkppnCMnr5d9LnsxV/edit?usp=sharing&ouid=112586075609758894128&rtpof=true&sd=true")
+
+
+max(ma2$planting_date)
+```
+
+```{r}
+ma2 <- ma2 %>%
+  mutate(
+    pd_90 = planting_date + 90)
+```
+
+```{r}
+
+
+library(httr)
+library(jsonlite)
+
+```
+
+```{r}
+
+# ===========================
+# Pacotes
+# ===========================
+library(httr)
+library(jsonlite)
+library(lubridate)
+library(dplyr)
+library(purrr)
+
+# ===========================
+# Configurações do usuário
+# ===========================
+# Variáveis diárias desejadas (ajuste conforme sua análise)
+
+
+daily_vars <- c(
+  "temperature_2m_max",
+  "temperature_2m_min",
+  "temperature_2m_mean",
+  "apparent_temperature_max",
+  "apparent_temperature_min",
+  "precipitation_sum",
+  "rain_sum",
+  "et0_fao_evapotranspiration",
+  "relative_humidity_2m_mean"
+)
+
+
+
+# Fuso horário da agregação diária: use "UTC" para evitar ambiguidade
+era5_timezone <- "UTC"   # ou "auto"
+
+# Intervalo curto (91 dias). Podemos tentar janela única primeiro.
+# Se preferir sempre fatiar por mês, deixe use_chunked <- TRUE
+use_chunked <- FALSE
+
+# Rate limit leve para lotes grandes (em segundos)
+rate_limit_sec <- 0.15   # ajuste para 0 se não quiser pausar entre requisições
+
+# ===========================
+# Validações do ma2
+# ===========================
+required_cols <- c("lat", "longitude", "planting_date", "pd_90")
+stopifnot(all(required_cols %in% names(ma2)))
+
+# Converter datas para "YYYY-MM-DD" se estiverem como Date
+if (inherits(ma2$planting_date, "Date")) {
+  ma2$planting_date <- format(ma2$planting_date, "%Y-%m-%d")
+}
+if (inherits(ma2$pd_90, "Date")) {
+  ma2$pd_90 <- format(ma2$pd_90, "%Y-%m-%d")
+}
+
+# ===========================
+# Funções auxiliares robustas
+# ===========================
+
+# 1) Requisição com retry, validação de JSON e headers corretos
+request_json_safe <- function(url, tries = 4, timeout_sec = 60, verbose = FALSE) {
+  resp <- RETRY(
+    "GET", url,
+    accept_json(),
+    user_agent("ma2-era5-r-script/1.0"),
+    timeout(timeout_sec),
+    times = tries,
+    pause_base = 1,
+    pause_cap = 8,
+    terminate_on = c(400, 401, 403, 404)  # erros permanentes
+  )
+  stop_for_status(resp)
+
+  raw <- content(resp, "raw")
+  txt <- rawToChar(raw)
+  Encoding(txt) <- "UTF-8"
+  # remove BOM, caso exista
+  txt <- sub("^\ufeff", "", txt)
+
+  # valida JSON
+  if (!jsonlite::validate(txt)) {
+    if (verbose) {
+      cat("\n--- Resposta não-JSON ---\n")
+      cat("Status:", status_code(resp), "\n")
+      cat("Content-Type:", headers(resp)[["content-type"]], "\n")
+      cat("Início da resposta:\n", substr(txt, 1, 400), "\n")
+      cat("-------------------------\n")
+    }
+    stop("Resposta do servidor não é JSON válida.")
+  }
+
+  parsed <- jsonlite::fromJSON(txt)
+  return(parsed)
+}
+
+# 2) Monta URL para ERA5 (Open-Meteo) com variáveis diárias
+build_era5_url <- function(lat, longitude, start_date, end_date,
+                           daily_vars = c("temperature_2m_max",
+                                          "temperature_2m_min",
+                                          "precipitation_sum"),
+                           timezone = "auto") {
+  base_url <- "https://archive-api.open-meteo.com/v1/era5"
+  daily_param <- paste(daily_vars, collapse = ",")
+  paste0(
+    base_url, "?",
+    "latitude=", lat,
+    "&longitude=", longitude,
+    "&start_date=", start_date,
+    "&end_date=", end_date,
+    "&daily=", daily_param,
+    "&timezone=", timezone
+  )
+}
+
+# 3) Janela simples (sem fatiamento)
+get_era5_daily_single <- function(lat, longitude, start_date, end_date,
+                                  daily_vars, timezone = "auto",
+                                  verbose = FALSE) {
+  # validações
+  sd <- as_date(start_date); ed <- as_date(end_date)
+  if (is.na(sd) || is.na(ed)) stop("Datas inválidas (use YYYY-MM-DD).")
+  if (ed < sd) stop("Data final anterior à inicial.")
+  if (!is.numeric(lat) || !is.numeric(longitude)) stop("lat/longitude devem ser numéricos.")
+
+  url <- build_era5_url(lat, longitude, sd, ed, daily_vars, timezone)
+  if (verbose) message("GET: ", url)
+
+  parsed <- request_json_safe(url, verbose = verbose)
+
+  if (is.null(parsed$daily) || is.null(parsed$daily$time)) {
+    stop("Resposta sem bloco 'daily'. Verifique parâmetros ou período.")
+  }
+
+  df <- as.data.frame(parsed$daily, stringsAsFactors = FALSE)
+  df$time <- as_date(df$time)
+
+  # rastreabilidade
+  df$lat <- lat
+  df$longitude <- longitude
+  # ⚠️ Aqui colocamos os limites da janela, que podem ser chunk (ver função chunked)
+  df$planting_date <- as.character(sd)
+  df$pd_90 <- as.character(ed)
+
+  return(df)
+}
+
+# 4) Versão com fatiamento por mês — mantendo planting_date e pd_90 ORIGINAIS
+get_era5_daily_chunked <- function(lat, longitude, planting_date, pd_90,
+                                   daily_vars,
+                                   timezone = "auto",
+                                   verbose = FALSE) {
+  sd <- as_date(planting_date); ed <- as_date(pd_90)
+  if (is.na(sd) || is.na(ed)) stop("Datas inválidas.")
+  if (ed < sd) stop("Data final anterior à inicial.")
+
+  # seq de inícios mensais
+  starts <- seq(sd, ed, by = "month")
+  # fins: dia anterior ao próximo início, exceto o último que é ed
+  ends <- c(starts[-1] - 1, ed)
+
+  purrr::map2_df(starts, ends, function(s, e) {
+    tryCatch({
+      df_chunk <- get_era5_daily_single(
+        lat = lat, longitude = longitude,
+        start_date = s, end_date = e,
+        daily_vars = daily_vars,
+        timezone = timezone,
+        verbose = verbose
+      )
+      # ✅ Manter datas originais do registro
+      df_chunk$planting_date <- as.character(planting_date)
+      df_chunk$pd_90 <- as.character(pd_90)
+      df_chunk
+    }, error = function(err) {
+      message("Falha em ", s, " a ", e, " (lat=", lat, ", lon=", longitude, "): ", err$message)
+      # vazio consistente
+      cols <- c("time", daily_vars, "lat", "longitude", "planting_date", "pd_90")
+      empty <- as.data.frame(setNames(replicate(length(cols), logical(0), simplify = FALSE), cols))
+      if ("time" %in% names(empty)) empty$time <- as.Date(empty$time)
+      empty
+    })
+  })
+}
+
+# ===========================
+# Função para aplicar em cada linha do ma2
+# ===========================
+fetch_row_safe <- function(row) {
+  # Pausa leve opcional para respeitar o servidor
+  if (rate_limit_sec > 0) Sys.sleep(rate_limit_sec)
+
+  lat <- as.numeric(row[["lat"]])
+  lon <- as.numeric(row[["longitude"]])
+  sd  <- as.character(row[["planting_date"]])
+  ed  <- as.character(row[["pd_90"]])
+
+  # Tenta janela única (91 dias), cai para chunked se falhar
+  if (!use_chunked) {
+    out <- tryCatch({
+      get_era5_daily_single(
+        lat = lat, longitude = lon,
+        start_date = sd, end_date = ed,
+        daily_vars = daily_vars,
+        timezone = era5_timezone,
+        verbose = FALSE
+      )
+    }, error = function(e) {
+      message("Janela única falhou para lat=", lat, ", lon=", lon,
+              " (", sd, " a ", ed, "): ", e$message,
+              " — tentando fatiar por mês.")
+      NULL
+    })
+    if (!is.null(out)) {
+      # garantir planting_date/pd_90 originais (por segurança)
+      out$planting_date <- sd
+      out$pd_90 <- ed
+      return(out)
+    }
+  }
+
+  # Fallback/força chunked
+  tryCatch({
+    get_era5_daily_chunked(
+      lat = lat, longitude = lon,
+      planting_date = sd, pd_90 = ed,
+      daily_vars = daily_vars,
+      timezone = era5_timezone,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    message("Falha total para lat=", lat, ", lon=", lon,
+            " (", sd, " a ", ed, "): ", e$message)
+    cols <- c("time", daily_vars, "lat", "longitude", "planting_date", "pd_90")
+    as.data.frame(setNames(replicate(length(cols), logical(0), simplify = FALSE), cols))
+  })
+}
+
+# ===========================
+# Execução sobre o ma2
+# ===========================
+# Observação: rowwise() + pmap() passa cada coluna como argumento
+result_list <- ma2 %>%
+  rowwise() %>%
+  pmap(function(...) {
+    fetch_row_safe(list(...))
+  })
+
+# Empilhar tudo em um único data.frame
+era5_all <- bind_rows(result_list)
+
+# Ordenar (opcional)
+era5_all <- era5_all %>%
+  arrange(lat, longitude, time)
+
+# Verificar resultado
+message("Linhas baixadas: ", nrow(era5_all))
+glimpse(era5_all)
+print(head(era5_all, 10))
+
+# ===========================
+# Exportar CSV consolidado
+# ===========================
+outfile <- paste0("era5_daily_ma2_", format(Sys.Date(), "%Y%m%d"), ".csv")
+write.csv(era5_all, outfile, row.names = FALSE)
+message("Arquivo salvo em: ", normalizePath(outfile))\
+
+
+
+
+
+
+```
+
+```{r}
+
+  ma2_unique =ma2 %>%
+  distinct(lat, longitude, planting_date, .keep_all = TRUE)
+
+final_join <- era5_all %>%
+  left_join(ma2_unique, by = c("lat", "longitude", "planting_date"))
+
+era5_ma2 = final_join %>% 
+mutate(epidemic = case_when(
+    mean_sev <= 25 ~ 0,
+   mean_sev > 25  ~ 1))
+
+era5_ma2$days = rep(0:90, 254)
+
+era5_ma2 |> 
+  filter(days <= 40) %>% 
+  ggplot(aes(as.factor(epidemic), temperature_2m_max))+
+   geom_boxplot( width = 0.3, alpha = 0.5, fill= 'white')
 
 ```
