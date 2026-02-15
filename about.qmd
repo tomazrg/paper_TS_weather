@@ -740,6 +740,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   theme(
     text = element_text(face = "bold", size = 14) )
 
+tmean_RR_second
 ```
 
 ```{r}
@@ -1182,6 +1183,8 @@ annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
     text = element_text(face = "bold", size = 14),
     axis.title.x = element_blank(),
     axis.text.x = element_blank())
+
+tmean_RR_first
 ```
 
 #### Precipitation
@@ -1253,6 +1256,8 @@ annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
   theme(
     text = element_text(face = "bold", size = 14) )
 
+rain_RR_second
+
 ```
 
 ##### Ealier window (41-70)
@@ -1323,6 +1328,8 @@ ggplot(aes(x=tmean, y=PERC)) +
     text = element_text(face = "bold", size = 14),
     axis.title.x = element_blank(),
     axis.text.x = element_blank())
+
+rain_RR_first
 ```
 
 #### VPD
@@ -1394,6 +1401,8 @@ annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
   theme(
     text = element_text(face = "bold", size = 14) )
 
+vpd_RR_second
+
 ```
 
 ##### Ealier window (41-70)
@@ -1464,6 +1473,8 @@ annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
     text = element_text(face = "bold", size = 14),
     axis.title.x = element_blank(),
     axis.text.x = element_blank())
+
+vpd_RR_first
 ```
 
 ```{r}
@@ -1634,6 +1645,7 @@ df_heat <- df_heat %>%
 library(ggplot2)
 library(dplyr)
 library(scales)
+library(metR)
 
 # 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
 #     e forçar limites simétricos ao redor de zero:
@@ -1676,6 +1688,7 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
     plot.subtitle = element_text(size = 10)
   )
 
+tmean_movel
 ```
 
 ##### Severity
@@ -1832,6 +1845,8 @@ sev_tmean = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
     linetype = "Phases") +
   theme_bw(base_size = 12) +
   theme(legend.title = element_text(face = "bold"))
+
+sev_tmean
 ```
 
 #### Precipitation
@@ -1962,6 +1977,8 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
     plot.title = element_text(face = "bold", size = 13),
     plot.subtitle = element_text(size = 10)
   )
+
+rain_movel
 
 ```
 
@@ -2107,6 +2124,8 @@ sev_rain = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
     linetype = "Phases") +
   theme_bw(base_size = 12) +
   theme(legend.title = element_text(face = "bold"))
+
+sev_rain
 ```
 
 #### VPD
@@ -2238,6 +2257,7 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
     plot.subtitle = element_text(size = 10)
   )
 
+vpd_movel
 ```
 
 ```{r}
@@ -2408,6 +2428,8 @@ sev_vpd = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
     legend.title = element_text(face = "bold"),
     axis.title = element_text(face = "bold", size = 12),
     axis.text  = element_text(size = 10))
+
+sev_vpd
 ```
 
 ```{r}
