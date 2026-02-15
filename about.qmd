@@ -853,9 +853,11 @@ res_v <- rr_by_year(var = "vpd", cb = cb_templates[["vpd"]], fit = fit_tmb,
                     wx_use = wx_use, dat = dat)
 
 
-res_v %>% 
-  filter(at >=0.66) %>% 
-  ggplot(aes(at,RR_vertical))+
+res_t %>% 
+  #filter(at >=0.66) %>% 
+  #filter(at >=5) %>%
+  filter(at >=25) %>%
+  ggplot(aes(at,RR_horizontal))+
   geom_smooth()+
   facet_wrap(~year)+
   theme_bw()
@@ -896,7 +898,11 @@ sum_t_vert <- summarize_year(curves_by_year_tmean, phase="vertical")
 sum_t_horz <- summarize_year(curves_by_year_tmean, phase="horizontal")
 sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
 sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
+sum_vpd_vert <- summarize_year(curves_by_year_vpd, phase="vertical")
+sum_vpd_horz <- summarize_year(curves_by_year_vpd, phase="horizontal")
 
+
+curves_by_year_tmean <- rr_by_year("tmean", cb_templates[["tmean"]], fit_tmb, wx_use, dat)
 curves_by_year_rain <- rr_by_year("rain", cb_templates[["rain"]], fit_tmb, wx_use, dat)
 curves_by_year_vpd  <- rr_by_year("vpd",  cb_templates[["vpd"]],  fit_tmb, wx_use, dat)
 ```
@@ -1048,6 +1054,10 @@ curves_by_year_vpd <- rr_by_year_list(
   dat = dat
 )
 
+impact_p90_p10(curves_by_year_tmean)
+impact_p90_p10(curves_by_year_rain)
+impact_p90_p10(curves_by_year_vpd)
+
 ```
 
 ```{r}
@@ -1055,10 +1065,20 @@ curves_by_year_vpd <- rr_by_year_list(
 sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
 
 # junte com sumários climáticos (ex.: temperatura vertical)
-df_join <- left_join(sum_t_vert, sev_year, by="year")
+df_join <- left_join(sum_r_vert, sev_year, by="year")
 
 # correlação simples
 cor(df_join$AUC_excess, df_join$sev_mean, use="complete.obs")
+
+
+df_join %>% 
+  ggplot(aes(AUC_excess))+
+  geom_histogram()
+
+df_join %>% 
+  #filter(!AUC_excess<0) %>% 
+  ggplot(aes(AUC_excess,sev_mean))+
+  geom_point()
 
 ```
 
@@ -1111,7 +1131,6 @@ Z <- scale(features)
 
 # vetor de clusters
 cl <- factor(km$cluster)
-
 
 ```
 
