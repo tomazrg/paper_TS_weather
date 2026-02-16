@@ -2258,8 +2258,8 @@ tmean_long <- tmean_p90_10 %>%
   ) %>%
   mutate(
     phase = recode(phase,
-                   RRh_delta = "Earlier",
-                   RRv_delta = "Later")
+                   RRh_delta = "Later",
+                   RRv_delta = "Earlier")
   )
 
 
@@ -2309,7 +2309,7 @@ tmean_year_plot = df %>%
   labs(x = "", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "right",
+  theme(legend.position = "none",
         axis.text.x = element_blank())
 
 
@@ -2323,8 +2323,8 @@ rain_long <- rain_p90_10 %>%
   ) %>%
   mutate(
     phase = recode(phase,
-                   RRh_delta = "Earlier",
-                   RRv_delta = "Later")
+                   RRh_delta = "Later",
+                   RRv_delta = "Earlier")
   )
 
 
@@ -2371,7 +2371,8 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   # linetype por phase
   scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
 
-  labs(x = "", y = expression(RR[delta])) +
+  labs(x = "", y = expression(RR[delta]),
+       linetype = "Phase") +
 
   theme_bw() +
   theme(legend.position = "right",
@@ -2389,8 +2390,8 @@ vpd_long <- vpd_p90_10 %>%
   ) %>%
   mutate(
     phase = recode(phase,
-                   RRh_delta = "Earlier",
-                   RRv_delta = "Later")
+                   RRh_delta = "Later",
+                   RRv_delta = "Earlier")
   )
 
 
@@ -2440,7 +2441,7 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   labs(x = "Year", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "right")
+  theme(legend.position = "none")
 
 
 
