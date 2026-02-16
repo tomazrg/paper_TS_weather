@@ -2265,7 +2265,7 @@ tmean_long <- tmean_p90_10 %>%
 
 
 df <- tmean_long %>%
-  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
 
 tmean_year_plot = df %>%  
   ggplot(aes(x = as.factor(year), y = RR_delta)) +
@@ -2275,13 +2275,13 @@ tmean_year_plot = df %>%
   # Earlier (nudge left) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = -0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Earlier"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = -0.15)
   ) +
@@ -2289,27 +2289,28 @@ tmean_year_plot = df %>%
   # Later (nudge right) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = 0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Later"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = 0.15)
   ) +
 
   # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
 
   # linetype por phase
   scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
 
-  labs(x = "Year", y = expression(RR[delta])) +
+  labs(x = "", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "right",
+        axis.text.x = element_blank())
 
 
 ######### RAIN
@@ -2329,7 +2330,7 @@ rain_long <- rain_p90_10 %>%
 
 
 df <- rain_long %>%
-  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
 
 rain_year_plot = df %>% 
 ggplot(aes(x = as.factor(year), y = RR_delta)) +
@@ -2339,13 +2340,13 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   # Earlier (nudge left) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = -0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Earlier"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = -0.15)
   ) +
@@ -2353,27 +2354,28 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   # Later (nudge right) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = 0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Later"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = 0.15)
   ) +
 
   # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
 
   # linetype por phase
   scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
 
-  labs(x = "Year", y = expression(RR[delta])) +
+  labs(x = "", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "right",
+        axis.text.x = element_blank())
 
 
 
@@ -2394,7 +2396,7 @@ vpd_long <- vpd_p90_10 %>%
 
 
 df <- vpd_long %>%
-  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
 
 vpd_year_plot = df %>% 
 ggplot(aes(x = as.factor(year), y = RR_delta)) +
@@ -2404,13 +2406,13 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   # Earlier (nudge left) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = -0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Earlier"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = -0.15)
   ) +
@@ -2418,19 +2420,19 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   # Later (nudge right) — segmento com linetype
   geom_segment(
     data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
     linewidth = 0.8,
     position = position_nudge(x = 0.15)
   ) +
   geom_point(
     data = df %>% filter(phase == "Later"),
-    aes(color = dir),
+    aes(color = Effect),
     size = 2.5,
     position = position_nudge(x = 0.15)
   ) +
 
   # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
 
   # linetype por phase
   scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
@@ -2438,10 +2440,13 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   labs(x = "Year", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "right")
 
 
-(tmean_year_plot/rain_year_plot/vpd_year_plot)|()
+
+(tmean_year_plot/rain_year_plot/vpd_year_plot)
+
+ggsave("fig/marginal_year.png", dpi = 600, bg = "white", height = 8, width = 6)
 ```
 
 ```{r}
