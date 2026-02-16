@@ -742,397 +742,6 @@ ggplot(aes(x=tmean, y=PERC)) +
 tmean_RR_second
 ```
 
-```{r}
-library(dplyr)
-library(purrr)
-library(dlnm)
-
-# ------------------ utilitário: pegar vetor garantindo existência -------------
-safe_pull <- function(data, varname) {
-  if (!(varname %in% names(data))) {
-    stop(
-      "A coluna '", varname, "' não existe no objeto fornecido.\n",
-      "Colunas disponíveis: ", paste(names(data), collapse = ", ")
-    )
-  }
-  data[[varname]]
-}
-
-# ------------------ função principal ------------------------------------------
-rr_by_year <- function(var = c("tmean","rain","vpd"),
-                       cb,                  # crossbasis dessa var (o mesmo do ajuste)
-                       fit,                 # seu glmmTMB ajustado (com (1|siteyear))
-                       wx_use,              # tabela com clima diário e uma coluna 'year'
-                       dat,                 # sua base com 'year' (para pegar a interseção)
-                       probs = seq(0.05, 0.95, by = 0.01),
-                       lags_vertical = 41:70,
-                       lags_horizontal = 0:40) {
-
-  var <- match.arg(var)
-
-  ## 1) pegar coeficientes e VCOV só dessa variável (seguindo seu padrão)
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-  prefix <- paste0("^cb_", var, "_")
-  idx <- grepl(prefix, names(cf))
-  if (!any(idx)) stop("Não encontrei coeficientes com prefixo ", prefix, " no modelo.")
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx, drop = FALSE]
-
-  ## 2) garantir coluna 'year' em wx_use
-  if (!("year" %in% names(wx_use))) {
-    if ("date" %in% names(wx_use)) {
-      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
-    } else {
-      stop("wx_use não tem coluna 'year' nem 'date'. Informe como identificar o ano.")
-    }
-  }
-
-  ## 3) checar existência da variável climática em wx_use
-  if (!(var %in% names(wx_use))) {
-    stop("A variável '", var, "' não existe em wx_use. Colunas: ",
-         paste(names(wx_use), collapse = ", "))
-  }
-
-  ## 4) interseção de anos entre as bases
-  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
-  if (length(years) == 0) stop("Sem interseção de anos entre dat$year e wx_use$year.")
-
-  ## 5) loop por ano com salvaguardas
-  out <- map_df(years, function(yr) {
-    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
-    x_yr <- x_yr[is.finite(x_yr)]
-    if (length(x_yr) == 0) {
-      warning("Ano ", yr, ": sem valores válidos para '", var, "'. Pulando.")
-      return(tibble(year = yr, at = numeric(0), RR_vertical = numeric(0), RR_horizontal = numeric(0)))
-    }
-
-    # grid seguro (se der NA/valor único, ainda assim terá ao menos 1 ponto)
-    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
-    grid <- grid[is.finite(grid)]
-    if (length(grid) == 0) grid <- median(x_yr, na.rm = TRUE)
-
-    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
-
-    # crosspred com MESMOS coeficientes do modelo global
-    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-
-    mf <- cp$matfit
-    lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
-    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf) - 1)
-
-    cols_v <- which(lag_idx %in% lags_vertical)
-    cols_h <- which(lag_idx %in% lags_horizontal)
-
-    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop = FALSE]) else rep(NA_real_, length(grid))
-    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop = FALSE]) else rep(NA_real_, length(grid))
-
-    tibble(
-      year = yr,
-      at = grid,
-      RR_vertical = exp(eta_v),
-      RR_horizontal = exp(eta_h)
-    )
-  })
-
-  out
-}
-
-
-# Para temperatura
-res_t <- rr_by_year(var = "tmean", cb = cb_templates[["tmean"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-# Para chuva
-res_r <- rr_by_year(var = "rain", cb = cb_templates[["rain"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-# Para VPD
-res_v <- rr_by_year(var = "vpd", cb = cb_templates[["vpd"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-
-res_t %>% 
-  #filter(at >=0.66) %>% 
-  #filter(at >=5) %>%
-  filter(at >=25) %>%
-  ggplot(aes(at,RR_horizontal))+
-  geom_smooth()+
-  facet_wrap(~year)+
-  theme_bw()
-
-
-
-
-curves_by_year_tmean <- rr_by_year(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-
-# curves_by_year: lista que você montou (por var) com $grid, $RR_vertical, $RR_horizontal
-summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
-  phase <- match.arg(phase)
-  purrr::imap_dfr(curves_by_year, function(x, yr){
-    g <- x$grid
-    rr <- if (phase=="vertical") x$RR_vertical else x$RR_horizontal
-    # área (trapézios) e estatísticas
-    AUC <- sum(diff(g) * zoo::rollmean(rr - 1, 2))
-    tibble::tibble(
-      year = as.integer(yr),
-      RR_mean = mean(rr, na.rm=TRUE),
-      RR_max  = max(rr, na.rm=TRUE),
-      at_max  = g[which.max(rr)],
-      AUC_excess = AUC
-    )
-  })
-}
-
-# Exemplo (temperatura):
-library(zoo)
-sum_t_vert <- summarize_year(curves_by_year_tmean, phase="vertical")
-sum_t_horz <- summarize_year(curves_by_year_tmean, phase="horizontal")
-sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
-sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
-sum_vpd_vert <- summarize_year(curves_by_year_vpd, phase="vertical")
-sum_vpd_horz <- summarize_year(curves_by_year_vpd, phase="horizontal")
-
-
-curves_by_year_tmean <- rr_by_year("tmean", cb_templates[["tmean"]], fit_tmb, wx_use, dat)
-curves_by_year_rain <- rr_by_year("rain", cb_templates[["rain"]], fit_tmb, wx_use, dat)
-curves_by_year_vpd  <- rr_by_year("vpd",  cb_templates[["vpd"]],  fit_tmb, wx_use, dat)
-```
-
-```{r}
-library(dplyr)
-library(purrr)
-library(dlnm)
-
-rr_by_year_list <- function(var = c("tmean","rain","vpd"),
-                            cb, fit, wx_use, dat,
-                            probs = seq(0.05, 0.95, by = 0.01),
-                            lags_vertical = 41:70,
-                            lags_horizontal = 0:40) {
-  var <- match.arg(var)
-
-  # --- coeficientes fixos dessa variável
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-  idx <- grepl(paste0("^cb_", var, "_"), names(cf))
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx, drop = FALSE]
-
-  # garantir coluna year em wx_use
-  if (!("year" %in% names(wx_use))) {
-    if ("date" %in% names(wx_use)) {
-      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
-    } else stop("wx_use precisa ter 'year' ou 'date'.")
-  }
-  if (!(var %in% names(wx_use))) {
-    stop("A variável '", var, "' não existe em wx_use. Tem: ",
-         paste(names(wx_use), collapse = ", "))
-  }
-
-  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
-  if (!length(years)) stop("Sem interseção de anos entre dat$year e wx_use$year.")
-
-  # ---- LOOP que devolve LISTA
-  out_list <- setNames(vector("list", length(years)), years)
-
-  for (i in seq_along(years)) {
-    yr <- years[i]
-    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
-    x_yr <- x_yr[is.finite(x_yr)]
-    if (!length(x_yr)) {
-      warning("Ano ", yr, " sem valores válidos para ", var, ".")
-      out_list[[i]] <- list(grid = numeric(0),
-                            RR_vertical = numeric(0),
-                            RR_horizontal = numeric(0))
-      next
-    }
-
-    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
-    grid <- grid[is.finite(grid)]
-    if (!length(grid)) grid <- median(x_yr, na.rm = TRUE)
-
-    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
-
-    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-
-    mf <- cp$matfit
-    lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-
-    cols_v <- which(lag_idx %in% lags_vertical)
-    cols_h <- which(lag_idx %in% lags_horizontal)
-
-    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop=FALSE]) else rep(NA_real_, length(grid))
-    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop=FALSE]) else rep(NA_real_, length(grid))
-
-    out_list[[i]] <- list(
-      grid = grid,
-      RR_vertical = exp(eta_v),
-      RR_horizontal = exp(eta_h)
-    )
-  }
-
-  out_list
-}
-
-
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
-  d <- purrr::imap_dfr(curves_by_year, function(x, yr){
-    tibble::tibble(
-      year = as.integer(yr),
-      at = x$grid,
-      RR  = if(phase=="vertical") x$RR_vertical else x$RR_horizontal
-    )
-  })
-  ggplot(d, aes(at, RR, group=year, color=factor(year))) +
-    geom_line(alpha=.6, linewidth=0.9) +
-    scale_color_viridis_d(end=.9, option="C") +
-    geom_hline(yintercept=1, linetype=2, color="grey40") +
-    labs(x = var_label, y = "RR (relativo ao P50 do ano)", color = "Ano") +
-    theme_minimal(base_size = 12)
-}
-
-plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="vertical")
-
-```
-
-```{r}
-impact_p90_p10 <- function(curves_by_year){
-  purrr::imap_dfr(curves_by_year, function(x, yr){
-    q10 <- quantile(x$grid, .10, na.rm=TRUE)
-    q90 <- quantile(x$grid, .90, na.rm=TRUE)
-    # aproxima RR por pontos mais próximos do grid
-    idx10 <- which.min(abs(x$grid - q10))
-    idx90 <- which.min(abs(x$grid - q90))
-    tibble::tibble(
-      year = as.integer(yr),
-      RRv_delta = x$RR_vertical[idx90] - x$RR_vertical[idx10],
-      RRh_delta = x$RR_horizontal[idx90] - x$RR_horizontal[idx10]
-    )
-  })
-}
-
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_rain <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_vpd <- rr_by_year_list(
-  var = "vpd",
-  cb = cb_templates[["vpd"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-impact_p90_p10(curves_by_year_tmean)
-impact_p90_p10(curves_by_year_rain)
-impact_p90_p10(curves_by_year_vpd)
-
-```
-
-```{r}
-# severidade média por ano (ajuste o nome da coluna de resposta)
-sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
-
-# junte com sumários climáticos (ex.: temperatura vertical)
-df_join <- left_join(sum_r_vert, sev_year, by="year")
-
-# correlação simples
-cor(df_join$AUC_excess, df_join$sev_mean, use="complete.obs")
-
-
-df_join %>% 
-  ggplot(aes(AUC_excess))+
-  geom_histogram()
-
-df_join %>% 
-  #filter(!AUC_excess<0) %>% 
-  ggplot(aes(AUC_excess,sev_mean))+
-  geom_point()
-
-```
-
-```{r}
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_rain <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_vpd <- rr_by_year_list(
-  var = "vpd",
-  cb = cb_templates[["vpd"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-features <- reduce(
-  list(
-    summarize_year(curves_by_year_tmean,"vertical") %>% select(year, T_vert=AUC_excess),
-    summarize_year(curves_by_year_tmean,"horizontal") %>% select(year, T_horz=AUC_excess),
-    summarize_year(curves_by_year_rain,"vertical") %>% select(year, R_vert=AUC_excess),
-    summarize_year(curves_by_year_rain,"horizontal") %>% select(year, R_horz=AUC_excess),
-    summarize_year(curves_by_year_vpd,"vertical") %>% select(year, V_vert=AUC_excess),
-    summarize_year(curves_by_year_vpd,"horizontal") %>% select(year, V_horz=AUC_excess)
-  ), ~ left_join(.x, .y, by="year")
-) %>% 
-  column_to_rownames("year")
-
-km <- kmeans(scale(features), centers = 3, nstart = 50)
-
-
-library(pheatmap)
-library(dplyr)
-
-# z-score por coluna para comparabilidade
-Z <- scale(features)
-
-# vetor de clusters
-cl <- factor(km$cluster)
-
-```
-
 ##### Ealier window (41-70)
 
 ```{r}
@@ -2314,6 +1923,599 @@ df_plot2 %>%
   ggplot(aes(mean))+
   geom_histogram()+
   facet_wrap(~phase+level)
+```
+
+### Effect across the years
+
+```{r}
+library(dplyr)
+library(purrr)
+library(dlnm)
+
+# ------------------ utilitário: pegar vetor garantindo existência -------------
+safe_pull <- function(data, varname) {
+  if (!(varname %in% names(data))) {
+    stop(
+      "A coluna '", varname, "' não existe no objeto fornecido.\n",
+      "Colunas disponíveis: ", paste(names(data), collapse = ", ")
+    )
+  }
+  data[[varname]]
+}
+
+# ------------------ função principal ------------------------------------------
+rr_by_year <- function(var = c("tmean","rain","vpd"),
+                       cb,                  # crossbasis dessa var (o mesmo do ajuste)
+                       fit,                 # seu glmmTMB ajustado (com (1|siteyear))
+                       wx_use,              # tabela com clima diário e uma coluna 'year'
+                       dat,                 # sua base com 'year' (para pegar a interseção)
+                       probs = seq(0.05, 0.95, by = 0.01),
+                       lags_vertical = 41:70,
+                       lags_horizontal = 0:40) {
+
+  var <- match.arg(var)
+
+  ## 1) pegar coeficientes e VCOV só dessa variável (seguindo seu padrão)
+  cf <- coef(summary(fit))$cond[,1]
+  vc <- vcov(fit)$cond
+  prefix <- paste0("^cb_", var, "_")
+  idx <- grepl(prefix, names(cf))
+  if (!any(idx)) stop("Não encontrei coeficientes com prefixo ", prefix, " no modelo.")
+  beta   <- cf[idx]
+  vc_sub <- vc[idx, idx, drop = FALSE]
+
+  ## 2) garantir coluna 'year' em wx_use
+  if (!("year" %in% names(wx_use))) {
+    if ("date" %in% names(wx_use)) {
+      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
+    } else {
+      stop("wx_use não tem coluna 'year' nem 'date'. Informe como identificar o ano.")
+    }
+  }
+
+  ## 3) checar existência da variável climática em wx_use
+  if (!(var %in% names(wx_use))) {
+    stop("A variável '", var, "' não existe em wx_use. Colunas: ",
+         paste(names(wx_use), collapse = ", "))
+  }
+
+  ## 4) interseção de anos entre as bases
+  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
+  if (length(years) == 0) stop("Sem interseção de anos entre dat$year e wx_use$year.")
+
+  ## 5) loop por ano com salvaguardas
+  out <- map_df(years, function(yr) {
+    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
+    x_yr <- x_yr[is.finite(x_yr)]
+    if (length(x_yr) == 0) {
+      warning("Ano ", yr, ": sem valores válidos para '", var, "'. Pulando.")
+      return(tibble(year = yr, at = numeric(0), RR_vertical = numeric(0), RR_horizontal = numeric(0)))
+    }
+
+    # grid seguro (se der NA/valor único, ainda assim terá ao menos 1 ponto)
+    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
+    grid <- grid[is.finite(grid)]
+    if (length(grid) == 0) grid <- median(x_yr, na.rm = TRUE)
+
+    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
+
+    # crosspred com MESMOS coeficientes do modelo global
+    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
+
+    mf <- cp$matfit
+    lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf) - 1)
+
+    cols_v <- which(lag_idx %in% lags_vertical)
+    cols_h <- which(lag_idx %in% lags_horizontal)
+
+    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop = FALSE]) else rep(NA_real_, length(grid))
+    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop = FALSE]) else rep(NA_real_, length(grid))
+
+    tibble(
+      year = yr,
+      at = grid,
+      RR_vertical = exp(eta_v),
+      RR_horizontal = exp(eta_h)
+    )
+  })
+
+  out
+}
+
+
+# Para temperatura
+res_t <- rr_by_year(var = "tmean", cb = cb_templates[["tmean"]], fit = fit_tmb,
+                    wx_use = wx_use, dat = dat)
+
+# Para chuva
+res_r <- rr_by_year(var = "rain", cb = cb_templates[["rain"]], fit = fit_tmb,
+                    wx_use = wx_use, dat = dat)
+
+# Para VPD
+res_v <- rr_by_year(var = "vpd", cb = cb_templates[["vpd"]], fit = fit_tmb,
+                    wx_use = wx_use, dat = dat)
+
+
+res_t %>% 
+  #filter(at >=0.66) %>% 
+  #filter(at >=5) %>%
+  filter(at >= 25) %>%
+  ggplot(aes(at,RR_vertical))+
+  geom_smooth()+
+  facet_wrap(~year, scale = "free_y")+
+  theme_bw()
+
+
+
+
+curves_by_year_tmean <- rr_by_year(
+  var = "tmean",
+  cb = cb_templates[["tmean"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+
+# curves_by_year: lista que você montou (por var) com $grid, $RR_vertical, $RR_horizontal
+summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
+  phase <- match.arg(phase)
+  purrr::imap_dfr(curves_by_year, function(x, yr){
+    g <- x$grid
+    rr <- if (phase=="vertical") x$RR_vertical else x$RR_horizontal
+    # área (trapézios) e estatísticas
+    AUC <- sum(diff(g) * zoo::rollmean(rr - 1, 2))
+    tibble::tibble(
+      year = as.integer(yr),
+      RR_mean = mean(rr, na.rm=TRUE),
+      RR_max  = max(rr, na.rm=TRUE),
+      at_max  = g[which.max(rr)],
+      AUC_excess = AUC
+    )
+  })
+}
+
+# Exemplo (temperatura):
+library(zoo)
+sum_t_vert <- summarize_year(curves_by_year_tmean, phase="vertical")
+sum_t_horz <- summarize_year(curves_by_year_tmean, phase="horizontal")
+sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
+sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
+sum_vpd_vert <- summarize_year(curves_by_year_vpd, phase="vertical")
+sum_vpd_horz <- summarize_year(curves_by_year_vpd, phase="horizontal")
+
+
+curves_by_year_tmean <- rr_by_year("tmean", cb_templates[["tmean"]], fit_tmb, wx_use, dat)
+curves_by_year_rain <- rr_by_year("rain", cb_templates[["rain"]], fit_tmb, wx_use, dat)
+curves_by_year_vpd  <- rr_by_year("vpd",  cb_templates[["vpd"]],  fit_tmb, wx_use, dat)
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+library(dlnm)
+
+rr_by_year_list <- function(var = c("tmean","rain","vpd"),
+                            cb, fit, wx_use, dat,
+                            probs = seq(0.05, 0.95, by = 0.01),
+                            lags_vertical = 41:70,
+                            lags_horizontal = 0:40) {
+  var <- match.arg(var)
+
+  # --- coeficientes fixos dessa variável
+  cf <- coef(summary(fit))$cond[,1]
+  vc <- vcov(fit)$cond
+  idx <- grepl(paste0("^cb_", var, "_"), names(cf))
+  beta   <- cf[idx]
+  vc_sub <- vc[idx, idx, drop = FALSE]
+
+  # garantir coluna year em wx_use
+  if (!("year" %in% names(wx_use))) {
+    if ("date" %in% names(wx_use)) {
+      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
+    } else stop("wx_use precisa ter 'year' ou 'date'.")
+  }
+  if (!(var %in% names(wx_use))) {
+    stop("A variável '", var, "' não existe em wx_use. Tem: ",
+         paste(names(wx_use), collapse = ", "))
+  }
+
+  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
+  if (!length(years)) stop("Sem interseção de anos entre dat$year e wx_use$year.")
+
+  # ---- LOOP que devolve LISTA
+  out_list <- setNames(vector("list", length(years)), years)
+
+  for (i in seq_along(years)) {
+    yr <- years[i]
+    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
+    x_yr <- x_yr[is.finite(x_yr)]
+    if (!length(x_yr)) {
+      warning("Ano ", yr, " sem valores válidos para ", var, ".")
+      out_list[[i]] <- list(grid = numeric(0),
+                            RR_vertical = numeric(0),
+                            RR_horizontal = numeric(0))
+      next
+    }
+
+    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
+    grid <- grid[is.finite(grid)]
+    if (!length(grid)) grid <- median(x_yr, na.rm = TRUE)
+
+    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
+
+    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
+
+    mf <- cp$matfit
+    lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
+    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
+
+    cols_v <- which(lag_idx %in% lags_vertical)
+    cols_h <- which(lag_idx %in% lags_horizontal)
+
+    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop=FALSE]) else rep(NA_real_, length(grid))
+    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop=FALSE]) else rep(NA_real_, length(grid))
+
+    out_list[[i]] <- list(
+      grid = grid,
+      RR_vertical = exp(eta_v),
+      RR_horizontal = exp(eta_h)
+    )
+  }
+
+  out_list
+}
+
+
+
+curves_by_year_tmean <- rr_by_year_list(
+  var = "rain",
+  cb = cb_templates[["rain"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
+  d <- purrr::imap_dfr(curves_by_year, function(x, yr){
+    tibble::tibble(
+      year = as.integer(yr),
+      at = x$grid,
+      RR  = if(phase=="vertical") x$RR_vertical else x$RR_horizontal
+    )
+  })
+  d = d %>% 
+    filter(at >=25)
+  
+  ggplot(d, aes(at, RR, group=year, color=factor(year))) +
+    geom_line(alpha=.6, linewidth=0.9) +
+    scale_color_viridis_d(end=.9, option="C") +
+    geom_hline(yintercept=1, linetype=2, color="grey40") +
+    labs(x = var_label, y = "RR (relativo ao P50 do ano)", color = "Ano") +
+    theme_minimal(base_size = 12)
+}
+
+plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="vertical")
+
+```
+
+```{r}
+impact_p90_p10 <- function(curves_by_year){
+  purrr::imap_dfr(curves_by_year, function(x, yr){
+    q10 <- quantile(x$grid, .10, na.rm=TRUE)
+    q90 <- quantile(x$grid, .975, na.rm=TRUE)
+    # aproxima RR por pontos mais próximos do grid
+    idx10 <- which.min(abs(x$grid - q10))
+    idx90 <- which.min(abs(x$grid - q90))
+    tibble::tibble(
+      year = as.integer(yr),
+      RRv_delta = x$RR_vertical[idx90],
+      RRh_delta = x$RR_horizontal[idx90] ,
+      RR_v_perc = (RRv_delta-1)*100,
+      RR_h_perc = (RRh_delta-1)*100
+    )
+  })
+}
+
+
+curves_by_year_tmean <- rr_by_year_list(
+  var = "tmean",
+  cb = cb_templates[["tmean"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+curves_by_year_rain <- rr_by_year_list(
+  var = "rain",
+  cb = cb_templates[["rain"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+curves_by_year_vpd <- rr_by_year_list(
+  var = "vpd",
+  cb = cb_templates[["vpd"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+tmean_p90_10 = impact_p90_p10(curves_by_year_tmean)
+rain_p90_10 = impact_p90_p10(curves_by_year_rain)
+vpd_p90_10 = impact_p90_p10(curves_by_year_vpd)
+
+
+######### TMEAN
+
+tmean_long <- tmean_p90_10 %>%
+  pivot_longer(
+    cols = c(RRh_delta, RRv_delta),
+    names_to = "phase",
+    values_to = "RR_delta"
+  ) %>%
+  mutate(
+    phase = recode(phase,
+                   RRh_delta = "Earlier",
+                   RRv_delta = "Later")
+  )
+
+
+
+df <- tmean_long %>%
+  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+
+tmean_year_plot = df %>%  
+  ggplot(aes(x = as.factor(year), y = RR_delta)) +
+  # linha horizontal de referência
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
+
+  # Earlier (nudge left) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Earlier"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = -0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Earlier"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = -0.15)
+  ) +
+
+  # Later (nudge right) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Later"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = 0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Later"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = 0.15)
+  ) +
+
+  # cores (acima/abaixo de 1)
+  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+
+  # linetype por phase
+  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
+
+  labs(x = "Year", y = expression(RR[delta])) +
+
+  theme_bw() +
+  theme(legend.position = "none")
+
+
+######### RAIN
+
+rain_long <- rain_p90_10 %>%
+  pivot_longer(
+    cols = c(RRh_delta, RRv_delta),
+    names_to = "phase",
+    values_to = "RR_delta"
+  ) %>%
+  mutate(
+    phase = recode(phase,
+                   RRh_delta = "Earlier",
+                   RRv_delta = "Later")
+  )
+
+
+
+df <- rain_long %>%
+  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+
+rain_year_plot = df %>% 
+ggplot(aes(x = as.factor(year), y = RR_delta)) +
+  # linha horizontal de referência
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
+
+  # Earlier (nudge left) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Earlier"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = -0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Earlier"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = -0.15)
+  ) +
+
+  # Later (nudge right) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Later"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = 0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Later"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = 0.15)
+  ) +
+
+  # cores (acima/abaixo de 1)
+  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+
+  # linetype por phase
+  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
+
+  labs(x = "Year", y = expression(RR[delta])) +
+
+  theme_bw() +
+  theme(legend.position = "none")
+
+
+
+######### VPD
+
+vpd_long <- vpd_p90_10 %>%
+  pivot_longer(
+    cols = c(RRh_delta, RRv_delta),
+    names_to = "phase",
+    values_to = "RR_delta"
+  ) %>%
+  mutate(
+    phase = recode(phase,
+                   RRh_delta = "Earlier",
+                   RRv_delta = "Later")
+  )
+
+
+
+df <- vpd_long %>%
+  mutate(dir = ifelse(RR_delta >= 1, "above", "below"))
+
+vpd_year_plot = df %>% 
+ggplot(aes(x = as.factor(year), y = RR_delta)) +
+  # linha horizontal de referência
+  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
+
+  # Earlier (nudge left) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Earlier"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = -0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Earlier"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = -0.15)
+  ) +
+
+  # Later (nudge right) — segmento com linetype
+  geom_segment(
+    data = df %>% filter(phase == "Later"),
+    aes(xend = as.factor(year), yend = 1, color = dir, linetype = phase),
+    linewidth = 0.8,
+    position = position_nudge(x = 0.15)
+  ) +
+  geom_point(
+    data = df %>% filter(phase == "Later"),
+    aes(color = dir),
+    size = 2.5,
+    position = position_nudge(x = 0.15)
+  ) +
+
+  # cores (acima/abaixo de 1)
+  scale_color_manual(values = c("above" = "red", "below" = "darkgreen")) +
+
+  # linetype por phase
+  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
+
+  labs(x = "Year", y = expression(RR[delta])) +
+
+  theme_bw() +
+  theme(legend.position = "none")
+
+
+(tmean_year_plot/rain_year_plot/vpd_year_plot)|()
+```
+
+```{r}
+# severidade média por ano (ajuste o nome da coluna de resposta)
+sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
+
+# junte com sumários climáticos (ex.: temperatura vertical)
+df_join <- left_join(sum_r_vert, sev_year, by="year")
+
+# correlação simples
+cor(df_join$AUC_excess, df_join$sev_mean, use="complete.obs")
+
+
+df_join %>% 
+  ggplot(aes(AUC_excess))+
+  geom_histogram()
+
+df_join %>% 
+  #filter(!AUC_excess<0) %>% 
+  ggplot(aes(AUC_excess,sev_mean))+
+  geom_point()
+
+```
+
+```{r}
+
+curves_by_year_tmean <- rr_by_year_list(
+  var = "tmean",
+  cb = cb_templates[["tmean"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+curves_by_year_rain <- rr_by_year_list(
+  var = "rain",
+  cb = cb_templates[["rain"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+curves_by_year_vpd <- rr_by_year_list(
+  var = "vpd",
+  cb = cb_templates[["vpd"]],
+  fit = fit_tmb,
+  wx_use = wx_use,
+  dat = dat
+)
+
+features <- reduce(
+  list(
+    summarize_year(curves_by_year_tmean,"vertical") %>% dplyr::select(year, T_vert=AUC_excess),
+    summarize_year(curves_by_year_tmean,"horizontal") %>% dplyr::select(year, T_horz=AUC_excess),
+    summarize_year(curves_by_year_rain,"vertical") %>% dplyr::select(year, R_vert=AUC_excess),
+    summarize_year(curves_by_year_rain,"horizontal") %>% dplyr::select(year, R_horz=AUC_excess),
+    summarize_year(curves_by_year_vpd,"vertical") %>% dplyr::select(year, V_vert=AUC_excess),
+    summarize_year(curves_by_year_vpd,"horizontal") %>% dplyr::select(year, V_horz=AUC_excess)
+  ), ~ left_join(.x, .y, by="year")
+) %>% 
+  column_to_rownames("year")
+
+km <- kmeans(scale(features), centers = 3, nstart = 50)
+
+
+library(pheatmap)
+library(dplyr)
+
+# z-score por coluna para comparabilidade
+Z <- scale(features)
+
+# vetor de clusters
+cl <- factor(km$cluster)
+
 ```
 
 ##### Severity
