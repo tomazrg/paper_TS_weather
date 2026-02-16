@@ -351,9 +351,6 @@ fit_tmb <- glmmTMB( #fit_tmb
 )
 
 summary(fit_tmb)
-
-AIC(fit_tmb,fit_tmb2,fit_tmb3)
-BIC(fit_tmb,fit_tmb2,fit_tmb3)
 ```
 
 This modeling step represents the inferential core of the analysis. The DLNM defines how climatic effects are structured across exposure levels and time lags, while the mixed-effects beta regression estimates the magnitude, direction, and uncertainty of these effects. The resulting model quantifies how past climatic conditions jointly shape disease severity at the assessment time, accounting for both delayed responses and unobserved heterogeneity among site–year combinations.
@@ -399,6 +396,7 @@ Here, $\hat{\beta}_0$ and $\hat{\boldsymbol{\beta}}^{(v)}$ are the estimated fix
 The resulting fitted values $\hat{\mu}_i$ correspond to the expected disease severity at the assessment time, given the full distributed lag history of climatic exposures encoded by the DLNM.
 
 ```{r}
+
 t = predict(fit_tmb, newdata = dat, type = "response")
 
 
@@ -458,6 +456,8 @@ tt$C.b
 
 r <- tt$rho.c[,1]/tt$C.b
 r
+
+gc()
 ```
 
 #### Graphical calibration and residual error distribution
@@ -716,14 +716,14 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_t_la <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-tmean_RR_second =rr_sum %>% 
+tmean_RR_second =rr_sum_t_la %>% 
   filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
@@ -732,10 +732,9 @@ ggplot(aes(x=tmean, y=PERC)) +
            fill = "lightgreen", color = "lightgreen",alpha = .7) +
   annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "#c40000") +
+  geom_smooth(size = 3, colour = "#c40000") +
   labs(x="Temperature (°C)",
-       y="Relative risk (%)",
-       title = "Second phase") +
+       y="Relative risk (%)") +
   theme_bw()+
   theme(
     text = element_text(face = "bold", size = 14) )
@@ -1177,26 +1176,25 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_t_ea <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-tmean_RR_first = rr_sum %>% 
+tmean_RR_first = rr_sum_t_ea %>% 
   filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
+ annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
            fill = "lightgreen", color = "lightgreen",alpha = .7) +
   annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "#C40000") +
+  geom_smooth(size = 3, colour = "#C40000") +
   labs(x="Temperature (°C)",
-       y="Relative risk (%)",
-       title = "First phase") +
+       y="Relative risk (%)") +
   theme_bw()+
   theme(
     text = element_text(face = "bold", size = 14),
@@ -1251,14 +1249,14 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_r_la <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-rain_RR_second =rr_sum %>% 
+rain_RR_second =rr_sum_r_la %>% 
   #filter(tmean >=25) %>% 
  filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
@@ -1267,10 +1265,9 @@ annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
            fill = "lightgreen", color = "lightgreen",alpha = .7) +
   annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "#1E90FF") +
+  geom_smooth(size = 3, colour = "#1E90FF") +
   labs(x="Precipitation (mm)",
-       y="Relative risk (%)",
-       title = "Second phase") +
+       y="") +
   theme_bw()+
   theme(
     text = element_text(face = "bold", size = 14) )
@@ -1322,14 +1319,14 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_r_ea <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-rain_RR_first = rr_sum %>% 
+rain_RR_first = rr_sum_r_ea %>% 
   #filter(tmean >=25) %>% 
  filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
@@ -1338,10 +1335,9 @@ ggplot(aes(x=tmean, y=PERC)) +
            fill = "lightgreen", color = "lightgreen",alpha = .7) +
   annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "#1E90FF") +
+  geom_smooth(size = 3, colour = "#1E90FF") +
   labs(x="Precipitation (mm)",
-       y="Relative risk (%)",
-       title = "First phase") +
+       y="") +
   theme_bw()+
   theme(
     text = element_text(face = "bold", size = 14),
@@ -1396,29 +1392,33 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_v_la <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-vpd_RR_second =rr_sum %>% 
+rr_sum_v_la$phase = "Later"
+
+vpd_RR_second =rr_sum_v_la %>% 
   #filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
 annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
            fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+   annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "green4") +
+  geom_smooth(size = 3, colour = "green4") +
   labs(x="VPD (kPa)",
-       y="Relative risk (%)",
-       title = "Second phase") +
+       y="") +
+  facet_wrap(~phase, strip.position = "right")+
   theme_bw()+
   theme(
-    text = element_text(face = "bold", size = 14) )
+    text = element_text(face = "bold", size = 14),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 18, face = "bold"))
 
 vpd_RR_second
 
@@ -1467,14 +1467,17 @@ etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
 
-rr_sum <- data.frame(
+rr_sum_v_ea <- data.frame(
   tmean = grid,
   RR_med = RR) %>% 
   mutate(
     PERC = (RR_med-1)*100
   )
 
-vpd_RR_first = rr_sum %>% 
+rr_sum_v_ea$phase = "Ealier"
+
+
+vpd_RR_first = rr_sum_v_ea %>% 
  # filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
@@ -1483,18 +1486,21 @@ annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
            fill = "lightgreen", color = "lightgreen", alpha = .7) +
   annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral", alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 2, colour = "green4") +
+  geom_smooth(size = 3, colour = "green4") +
   labs(x="Precipitation (mm)",
-       y="Relative risk (%)",
-       title = "First phase") +
+       y="") +
+    facet_wrap(~phase, strip.position = "right")+
   theme_bw()+
   theme(
     text = element_text(face = "bold", size = 14),
     axis.title.x = element_blank(),
-    axis.text.x = element_blank())
+    axis.text.x = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 18, face = "bold"))
 
 vpd_RR_first
 ```
+
 
 ```{r}
 library(patchwork)
@@ -1502,7 +1508,7 @@ library(patchwork)
 tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
 
 
-ggsave("fig/RR.png", dpi = 600, width = 10, height = 6)
+ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
 ```
 
 ### Lag movel
@@ -1842,7 +1848,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:70)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -1854,6 +1860,7 @@ band_df <- bind_rows(lapply(names(eta_band), function(nm) {
   )
 }), .id = NULL)
 
+
 sev_tmean = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
   geom_smooth(size = 2, se = F, color = "#c40000") +
@@ -1863,7 +1870,11 @@ sev_tmean = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
     y = "Severity (%)",
     linetype = "Phases") +
   theme_bw(base_size = 12) +
-  theme(legend.title = element_text(face = "bold"))
+  theme(
+    legend.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10))
+
 
 sev_tmean
 ```
@@ -2121,7 +2132,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:70)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -2142,7 +2153,10 @@ sev_rain = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
     y = "Severity (%)",
     linetype = "Phases") +
   theme_bw(base_size = 12) +
-  theme(legend.title = element_text(face = "bold"))
+  theme(
+    legend.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10))
 
 sev_rain
 ```
@@ -2422,7 +2436,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`0–40` = 0:40, `41–70` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:70)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -2728,29 +2742,268 @@ df_mean <- data.frame(
   tmean = grid,
   RR_med = RR
 ) %>% 
-  filter(tmean >= 5)
+  filter(tmean >= 0.66)
 
 df_sim2 = df_sim %>% 
   group_by(tmean) %>% 
   summarise(
-    RR = mean(RR))
+    RR1 = mean(RR),
+    lo = quantile(RR, 0.025, na.rm=TRUE),
+    hi = quantile(RR, 0.975, na.rm=TRUE)) %>% 
+  mutate(
+    RR1 = (RR1-1)*100,
+    lo = (lo-1)*100,
+    hi = (hi-1)*100
+  )
 
 df_sim %>% 
-  filter(tmean >= 5) %>%
+  filter(tmean >= 0.66) %>%
   filter(RR <75) %>% 
 ggplot() +
   geom_smooth(aes(x = tmean, y = RR),
             color = "black", alpha = 0.5, size = 2) +
-  #geom_smooth(data = df_mean, aes(x = tmean, y = RR_med),
-   #         color = "red", size = 1.2) +
+ # geom_smooth(data = df_mean, aes(x = tmean, y = RR_med),
+  #         color = "red", size = 1.2) +
   geom_hline(yintercept = 1, linetype=2) +
   labs(x = "Precipitação (mm)",
        y = "Razão de odds relativa (P75 vs P50, lags 60–70)",
        title = "Efeito cumulativo de precipitação (com incerteza paramétrica)") +
   theme_bw()
 
-
+gc()
 ```
+
+```{r}
+extract_rr_from_fit <- function(fit, var, grid, P50, colsA) {
+
+  cf <- coef(summary(fit))$cond[,1]
+  vc <- vcov(fit)$cond
+
+  idx <- grepl(paste0("^cb_", var, "_"), names(cf))
+
+  beta <- cf[idx]
+  vc_sub <- vc[idx, idx]
+
+  cp <- crosspred(
+    cb_templates[[var]],
+    coef = beta,
+    vcov = vc_sub,
+    at   = grid,
+    cen  = P50,
+    bylag = 1
+  )
+
+  mf <- cp$matfit
+  eta <- rowSums(mf[, colsA, drop=FALSE])
+
+  return(eta)  # retorna log-RR (η)
+}
+
+
+library(glmmTMB)
+
+set.seed(123)
+B <- 300   # 200–500 já costuma ser suficiente
+
+eta_boot <- vector("list", B)
+
+for (b in 1:B) {
+
+  # 1) simular nova resposta do modelo ajustado
+  dat_boot <- dat
+  dat_boot$sev <- simulate(fit_tmb, nsim = 1)[[1]]
+
+  # 2) reajustar o modelo
+  fit_boot <- try(
+    glmmTMB(formula = formula(fit_tmb),
+            data = dat_boot,
+            family = beta_family(link="logit")),
+    silent = TRUE
+  )
+
+  if (inherits(fit_boot, "try-error")) next
+
+  # 3) extrair η (log-RR) para a variável de interesse
+  eta_boot[[b]] <- extract_rr_from_fit(
+    fit_boot,
+    var  = "tmean",
+    grid = grid,
+    P50  = P50,
+    colsA = colsA
+  )
+}
+
+# combinar
+eta_mat <- do.call(cbind, eta_boot)
+
+
+df_ci <- data.frame(
+  tmean = grid,
+  eta_lo = apply(eta_mat, 1, quantile, 0.025, na.rm=TRUE),
+  eta_med= apply(eta_mat, 1, quantile, 0.50,  na.rm=TRUE),
+  eta_hi = apply(eta_mat, 1, quantile, 0.975, na.rm=TRUE)
+) %>%
+  mutate(
+    RR_med = exp(eta_med),
+    RR_lo  = exp(eta_lo),
+    RR_hi  = exp(eta_hi),
+    PERC_med = (RR_med - 1) * 100,
+    PERC_lo  = (RR_lo  - 1) * 100,
+    PERC_hi  = (RR_hi  - 1) * 100
+  )
+```
+
+```{r}
+library(dlnm)
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# =========================================================
+# CONFIGURAÇÕES (ajuste aqui)
+# =========================================================
+var        <- "vpd"         # "rain", "tmean", "vpd"
+lag_window <- 41:70          # ex: 0:40 ou 41:70 ou 60:70
+nsim       <- 1000            # 300-800 costuma bastar (1000 raramente necessário)
+grid_probs <- seq(0.05, 0.95, by = 0.01)   # domínio com suporte (P10–P90)
+k_trunc    <- 2.5            # truncamento por k*SE (2.0 a 3.0)
+eta_cap    <- 6              # rejeita simulações com |eta| > eta_cap (6 => RR~403)
+set.seed(123)
+
+# =========================================================
+# 0) OBJETOS NECESSÁRIOS: cb, beta, vc_sub, x_all, grid, P50, colsA
+# (segue seu padrão de extração)
+# =========================================================
+cb <- cb_templates[[var]]
+
+cf <- coef(summary(fit_tmb))$cond[,1]
+vc <- vcov(fit_tmb)$cond
+idx <- grepl(paste0("^cb_", var, "_"), names(cf))
+beta   <- cf[idx]
+vc_sub <- vc[idx, idx, drop = FALSE]
+
+# checagem de consistência (evita erro "coef/vcov not consistent")
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(vc_sub) == ncol(cb))
+
+# grid restrito ao suporte empírico
+x_all <- wx_use[[var]]
+grid  <- sort(unique(as.numeric(quantile(x_all, probs = grid_probs, na.rm = TRUE))))
+
+# referência (P50) usada como centragem
+P50 <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# crosspred base só para descobrir colunas de lag
+cp0 <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
+mf0 <- cp0$matfit
+lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf0))))
+if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf0)-1)
+
+colsA <- which(lag_idx %in% lag_window)
+stopifnot(length(colsA) > 0)
+
+# =========================================================
+# 1) IC "analítico" como baseline (sem simulação) — opcional
+# crosspred já devolve ICs por lag via matlow/mathigh [1](https://cran.r-project.org/web/packages/dlnm/dlnm.pdf)[2](https://ericrscott.com/posts/2021-01-13-dlnm-getting-started/)
+# =========================================================
+eta_hat <- rowSums(mf0[, colsA, drop=FALSE])   # log-RR acumulado (vs cen)
+RR_hat  <- exp(eta_hat)
+
+df_hat <- tibble(
+  x = grid,
+  eta = eta_hat,
+  RR  = RR_hat,
+  PERC = (RR_hat - 1) * 100
+)
+
+# =========================================================
+# 2) SIMULAÇÃO MVN COM TRUNCAMENTO POR k*SE
+# =========================================================
+sd_beta <- sqrt(diag(vc_sub))
+low_vec  <- as.numeric(beta - k_trunc * sd_beta)
+high_vec <- as.numeric(beta + k_trunc * sd_beta)
+
+beta_sim <- MASS::mvrnorm(n = nsim, mu = beta, Sigma = vc_sub)
+
+# truncamento por coluna (mantém nsim x p)
+LOW  <- matrix(rep(low_vec,  each = nsim), nrow = nsim)
+HIGH <- matrix(rep(high_vec, each = nsim), nrow = nsim)
+beta_sim <- pmin(pmax(beta_sim, LOW), HIGH)
+
+# =========================================================
+# 3) Função para obter ETA (log-RR) acumulado por grid
+# =========================================================
+compute_eta <- function(beta_vec){
+  cp_sim <- crosspred(cb, coef = beta_vec, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
+  mf_sim <- cp_sim$matfit
+  rowSums(mf_sim[, colsA, drop=FALSE])
+}
+
+# =========================================================
+# 4) Rodar simulações + rejeitar draws patológicos por |eta|
+# =========================================================
+eta_list <- vector("list", nsim)
+keep <- logical(nsim)
+
+for(i in 1:nsim){
+  et <- compute_eta(beta_sim[i, ])
+  if(all(is.finite(et)) && max(abs(et), na.rm = TRUE) <= eta_cap){
+    keep[i] <- TRUE
+    eta_list[[i]] <- et
+  }
+}
+
+message("Simulações aceitas: ", sum(keep), " / ", nsim)
+
+eta_mat <- do.call(cbind, eta_list[keep])
+stopifnot(!is.null(eta_mat))
+
+# =========================================================
+# 5) Resumo dos ICs NO ETA e depois converter para RR e %
+# =========================================================
+df_ci <- tibble(
+  x = grid,
+  eta_lo  = apply(eta_mat, 1, quantile, 0.025, na.rm = TRUE),
+  eta_med = apply(eta_mat, 1, quantile, 0.50,  na.rm = TRUE),
+  eta_hi  = apply(eta_mat, 1, quantile, 0.975, na.rm = TRUE)
+) %>%
+  mutate(
+    RR_lo  = exp(eta_lo),
+    RR_med = exp(eta_med),
+    RR_hi  = exp(eta_hi),
+    PERC_lo  = (RR_lo  - 1) * 100,
+    PERC_med = (RR_med - 1) * 100,
+    PERC_hi  = (RR_hi  - 1) * 100
+  ) %>% 
+  filter(x >=0.66)
+
+# =========================================================
+# 6) Plot recomendado: mediana + IC (sem geom_smooth)
+# =========================================================
+lab_x <- switch(var,
+                "rain"  = "Precipitation (mm)",
+                "tmean" = "Temperature (°C)",
+                "vpd"   = "VPD (kPa)",
+                "Exposure")
+
+df_ci %>% 
+ggplot(aes(x = x)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_line(aes(y = RR_med), color = "black", linewidth = 1.2) +
+  geom_line(aes(y = RR_lo),  color = "grey40", linetype = "dashed") +
+  geom_line(aes(y = RR_hi),  color = "grey40", linetype = "dashed") +
+  labs(
+    x = lab_x,
+    y = "Relative risk (% change)",
+    title = paste0("DLNM cumulative effect with stabilized uncertainty (lags ",
+                   min(lag_window), "–", max(lag_window), ")"),
+    subtitle = paste0("Grid: P", min(grid_probs)*100, "–P", max(grid_probs)*100,
+                      "; MVN truncation: ±", k_trunc, "SE; eta cap: ", eta_cap)
+  ) +
+  theme_bw()
+```
+
 
 ### OR para as 2 fases
 
@@ -2762,7 +3015,7 @@ get_dlnm_cumulative_glmmtmb <- function(var,
                                         fit_tmb,
                                         lagA = 0:40,
                                         lagB = 41:70,
-                                        at_probs = c(0.50, 0.75)) {
+                                        at_probs = c(0.50, 0.975)) {
   
   # 1) Intervalo de exposição (P50 vs P75, igual ao brms)
   x_all <- wx_use[[var]]
@@ -2830,11 +3083,9 @@ cum_rain   <- get_dlnm_cumulative_glmmtmb("rain", cb_templates[["rain"]],
                                          fit_tmb, lagA=0:40, lagB=41:70)
 
 
-cum_tmax <- get_dlnm_cumulative_glmmtmb("tmax", cb_templates[["tmax"]],
-                                         fit_tmb, lagA=0:40, lagB=41:70)
 
 # Para temperatura média
-quantile(wx_use$tmean, probs = c(0.50, 0.75), na.rm = TRUE)
+quantile(wx_use$tmean, probs = c(0.50, 0.975), na.rm = TRUE)
 
 # Para VPD
 quantile(wx_use$vpd, probs = c(0.50, 0.75), na.rm = TRUE)
@@ -2843,3 +3094,319 @@ quantile(wx_use$vpd, probs = c(0.50, 0.75), na.rm = TRUE)
 quantile(wx_use$rain, probs = c(0.50, 0.75), na.rm = TRUE)
 
 ```
+
+```{r}
+get_dlnm_cumulative_glmmtmb_window_quantiles <- function(var,
+                                                         cb_template,
+                                                         fit_tmb,
+                                                         lagA = 0:40,
+                                                         lagB = 41:70,
+                                                         probs = c(0.50, 0.75),
+                                                         end_dap = END_DAP) {
+
+  # ------------------------------------------------------------
+  # 1) Construir variável lag = end_dap - dpp e pegar x por janela
+  # ------------------------------------------------------------
+  wx_tmp <- wx_use %>%
+    mutate(lag = end_dap - dpp) %>%
+    filter(!is.na(.data[[var]]))
+
+  xA <- wx_tmp %>% filter(lag %in% lagA) %>% pull(.data[[var]])
+  xB <- wx_tmp %>% filter(lag %in% lagB) %>% pull(.data[[var]])
+
+  # quantis por janela
+  qA <- as.numeric(quantile(xA, probs = probs, na.rm = TRUE))
+  qB <- as.numeric(quantile(xB, probs = probs, na.rm = TRUE))
+
+  ref_A <- qA[1]; hi_A <- qA[2]   # P50 e P75 da janela A
+  ref_B <- qB[1]; hi_B <- qB[2]   # P50 e P75 da janela B
+
+  # ------------------------------------------------------------
+  # 2) Extrair betas e vcov do var no modelo glmmTMB
+  # ------------------------------------------------------------
+  prefix <- paste0("^cb_", var, "_")
+  cf     <- coef(summary(fit_tmb))$cond[,1]
+  vc     <- vcov(fit_tmb)$cond
+
+  idx    <- grepl(prefix, names(cf))
+  beta   <- cf[idx]
+  vc_sub <- vc[idx, idx, drop = FALSE]
+
+  # ------------------------------------------------------------
+  # 3) crosspred separado por janela (para usar cen diferente)
+  # ------------------------------------------------------------
+
+  # Janela A: referência = P50_A, contraste = P75_A
+  cpA <- crosspred(
+    cb_template,
+    coef = beta,
+    vcov = vc_sub,
+    at   = c(ref_A, hi_A),
+    cen  = ref_A,
+    bylag = 1
+  )
+  mfA <- cpA$matfit
+
+  lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mfA))))
+  if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mfA)-1)
+
+  colsA <- which(lag_idx %in% lagA)
+  dA <- sum(mfA[2, colsA], na.rm = TRUE)
+
+  # Janela B: referência = P50_B, contraste = P75_B
+  cpB <- crosspred(
+    cb_template,
+    coef = beta,
+    vcov = vc_sub,
+    at   = c(ref_B, hi_B),
+    cen  = ref_B,
+    bylag = 1
+  )
+  mfB <- cpB$matfit
+
+  colsB <- which(lag_idx %in% lagB)
+  dB <- sum(mfB[2, colsB], na.rm = TRUE)
+
+  # ------------------------------------------------------------
+  # 4) Retorno
+  # ------------------------------------------------------------
+  data.frame(
+    var = var,
+    lagA_min = min(lagA), lagA_max = max(lagA),
+    lagB_min = min(lagB), lagB_max = max(lagB),
+
+    ref_P50_later = ref_A,
+    hi_P75_later  = hi_A,
+    ref_P50_earlier = ref_B,
+    hi_P75_earlier  = hi_B,
+
+    delta_eta_later = dA,
+    delta_eta_earlier = dB,
+    OR_later = exp(dA),
+    OR_earlier = exp(dB),
+    PERC_later = (exp(dA) - 1) * 100,
+    PERC_earlier = (exp(dB) - 1) * 100
+  )
+}
+
+
+cum_tmean <- get_dlnm_cumulative_glmmtmb_window_quantiles(
+  "tmean", cb_templates[["tmean"]], fit_tmb, lagA = 0:40, lagB = 41:70
+)
+
+cum_rain <- get_dlnm_cumulative_glmmtmb_window_quantiles(
+  "rain", cb_templates[["rain"]], fit_tmb, lagA = 0:40, lagB = 41:70
+)
+
+cum_vpd <- get_dlnm_cumulative_glmmtmb_window_quantiles(
+  "vpd", cb_templates[["vpd"]], fit_tmb, lagA = 0:40, lagB = 41:70
+)
+```
+
+
+# Discriptive plotting
+```{r}
+wx_summarise = wx_use %>% 
+  filter(dpp <= 85) %>% 
+  group_by(dpp) %>% 
+  summarise(
+    TMEAN = mean(tmean),
+    TMEAN_low = quantile(tmean,0.025),
+    TMEAN_high = quantile(tmean,0.975),
+    RAIN = mean(rain),
+    RAIN_low = quantile(rain,0.025),
+    RAIN_high = quantile(rain,0.975),
+    VPD = mean(vpd),
+    VPD_low = quantile(vpd,0.025),
+    VPD_high = quantile(vpd,0.975)
+  )
+
+
+
+library(ggplot2)
+
+tmean_plot = ggplot() +
+  geom_smooth(
+    data = wx_use %>% filter(dpp <= 85),
+    aes(dpp, tmean, group = epi_id),
+    color = "firebrick",
+    alpha = 0.1,
+    linewidth = 0.6, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, TMEAN),
+    color = "black",
+    linewidth = 1.2, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, TMEAN_low),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, TMEAN_high),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  labs(
+    x = "Days",
+    y = "Temperature (°C)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+
+
+
+vpd_plot = ggplot() +
+  geom_smooth(
+    data = wx_use %>% filter(dpp <= 85),
+    aes(dpp, vpd, group = epi_id),
+    color = "green4",
+    alpha = 0.1,
+    linewidth = 0.6, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, VPD),
+    color = "black",
+    linewidth = 1.2, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, VPD_low),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, VPD_high),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  labs(
+    x = "Days",
+    y = "VPD (kPa)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+
+
+
+rain_plot = ggplot() +
+  geom_smooth(
+    data = wx_use %>% filter(dpp <= 85),
+    aes(dpp, rain, group = epi_id),
+    color = "#1E90FF",
+    alpha = 0.1,
+    linewidth = 0.6, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, RAIN),
+    color = "black",
+    linewidth = 1.2, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, RAIN_low),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  geom_smooth(
+    data = wx_summarise,
+    aes(dpp, RAIN_high),
+    linetype = "dashed",
+    color = "black",
+    linewidth = 0.8, se = F
+  ) +
+  labs(
+    x = "Days",
+    y = "Precipitation (mm)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+
+tmean_plot+rain_plot+vpd_plot
+```
+
+
+
+```{r}
+lat_plot = epi %>% 
+  ggplot(aes(lat))+
+  geom_histogram(colour = "white", fill = "#002f61", bins = 12)+
+   labs(
+    x = "Latitude",
+    y = "Frequency"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+
+
+
+lon_plot = epi %>% 
+  ggplot(aes(lon))+
+  geom_histogram(colour = "white", fill = "#002f61", bins = 12)+
+   labs(
+    x = "Longitude",
+    y = "Frequency"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+```
+
+```{r}
+weather_data <- epi %>%
+  mutate(
+    # Criando a data permitida diretamente com base no estado
+    allowed_date = case_when(
+      state == "MT" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")), 
+      state == "MS" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")),
+      state == "GO" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-25")),
+      state == "PR" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-11")),
+      state == "TO" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "DF" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "BA" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "MG" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")) 
+    ),
+    # Ajustando o ano da allowed_date para casos de janeiro e fevereiro
+    allowed_date = if_else(
+      format(planting_date, "%m") %in% c("01", "02"), 
+      as.Date(paste0(as.numeric(format(planting_date, "%Y")) - 1, "-", format(allowed_date, "%m-%d"))),
+      allowed_date
+    ),
+    # Calculando a diferença em dias
+    days_difference = as.numeric(planting_date - allowed_date)
+  )
+
+days_plot = weather_data %>% 
+ggplot(aes(days_difference)) +
+  geom_histogram(color = "white", fill= "#002f61", bins = 12)+
+  labs(
+    x = "Days",
+    y = "Frequency") +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+```
+
+```{r}
+
+(tmean_plot+rain_plot+vpd_plot)/(days_plot+lat_plot+lon_plot)
+
+ggsave("fig/covariates.png", dpi = 600, bg = "white", height = 6, width = 10)
+```
+
