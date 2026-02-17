@@ -63,6 +63,7 @@ epi  <- read_csv("data/targetspot_epidemics_clean.csv", show_col_types = FALSE)
 wx   <- read_csv("data/targetspot_weather_long_0_90dap.csv", show_col_types = FALSE)
 ends <- read_csv("data/targetspot_assessment_endpoints_80_85_90dap.csv", show_col_types = FALSE)
 
+
 stopifnot(END_DAP %in% unique(ends$end_dap))
 
 end_use <- ends |>
@@ -2373,8 +2374,8 @@ plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="
 ```{r}
 impact_p90_p10 <- function(curves_by_year){
   purrr::imap_dfr(curves_by_year, function(x, yr){
-    q10 <- quantile(x$grid, .10, na.rm=TRUE)
-    q90 <- quantile(x$grid, .975, na.rm=TRUE)
+    q10 <- quantile(x$grid, .50, na.rm=TRUE)
+    q90 <- quantile(x$grid, .90, na.rm=TRUE)
     # aproxima RR por pontos mais próximos do grid
     idx10 <- which.min(abs(x$grid - q10))
     idx90 <- which.min(abs(x$grid - q90))
@@ -2382,6 +2383,7 @@ impact_p90_p10 <- function(curves_by_year){
       year = as.integer(yr),
       RRv_delta = x$RR_vertical[idx90],
       RRh_delta = x$RR_horizontal[idx90] ,
+      delta_RR = RRh_delta - RRv_delta,
       RR_v_perc = (RRv_delta-1)*100,
       RR_h_perc = (RRh_delta-1)*100
     )
@@ -2480,7 +2482,8 @@ tmean_year_plot = df %>%
 
   theme_bw() +
   theme(legend.position = "none",
-        axis.text.x = element_blank())
+        axis.text.x = element_blank())+
+  coord_flip()
 
 
 ######### RAIN
@@ -2546,7 +2549,8 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
 
   theme_bw() +
   theme(legend.position = "right",
-        axis.text.x = element_blank())
+        axis.text.x = element_blank())+
+  coord_flip()
 
 
 
@@ -2611,7 +2615,8 @@ ggplot(aes(x = as.factor(year), y = RR_delta)) +
   labs(x = "Year", y = expression(RR[delta])) +
 
   theme_bw() +
-  theme(legend.position = "none")
+  theme(legend.position = "none")+
+  coord_flip()
 
 
 
@@ -3630,5 +3635,222 @@ ggplot(aes(days_difference)) +
 (tmean_plot+rain_plot+vpd_plot)/(days_plot+lat_plot+lon_plot)
 
 ggsave("fig/covariates.png", dpi = 600, bg = "white", height = 6, width = 10)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+
+# -------------------------------------------------------------------
+# PARÂMETROS (iguais aos do DLNM)
+# -------------------------------------------------------------------
+END_DAP <- 85      # dia da avaliação final (R6)
+LAG_MAX <- 70      # janela retrospectiva (dias antes do END_DAP)
+
+# definição das fases (em dias ANTES do R6)
+LATER_MAX_LAG   <- 40    # 0–40 dias antes do R6
+EARLIER_MIN_LAG <- 41    # 41–70 dias antes do R6
+EARLIER_MAX_LAG <- 70
+
+# -------------------------------------------------------------------
+# 1) ANO ÂNCORA DA EPIDEMIA
+#    (usar o MESMO ano usado no DLNM / severidade)
+# -------------------------------------------------------------------
+epi_year_tbl <- epi_use %>%
+  transmute(
+    epi_id,
+    epi_year = year          # ano da epidemia (plantio/estudo)
+  )
+
+# -------------------------------------------------------------------
+# 2) JUNTAR ANO ÂNCORA AO CLIMA DIÁRIO
+# -------------------------------------------------------------------
+wx_use2 <- wx_use %>%
+  left_join(epi_year_tbl, by = "epi_id")
+
+# -------------------------------------------------------------------
+# 3) SELECIONAR JANELA EFETIVA DO DLNM
+#    (END_DAP - LAG_MAX) até END_DAP
+# -------------------------------------------------------------------
+start_dpp <- END_DAP - LAG_MAX   # ex.: 85 - 70 = 15
+
+wx_win <- wx_use2 %>%
+  filter(dpp >= start_dpp, dpp <= END_DAP) %>%
+  mutate(
+    lag_day = END_DAP - dpp,   # dias ANTES do R6
+    phase = case_when(
+      lag_day <= LATER_MAX_LAG ~ "Later",
+      lag_day >= EARLIER_MIN_LAG & lag_day <= EARLIER_MAX_LAG ~ "Earlier"
+    )
+  )
+
+# (checagem opcional)
+# wx_win %>% count(phase, lag_day) %>% arrange(phase, lag_day)
+
+# -------------------------------------------------------------------
+# 4) CALCULAR P90 GLOBAL (mesma referência para todos os anos)
+# -------------------------------------------------------------------
+p90_tbl <- wx_win %>%
+  summarise(
+    p90_tmean = quantile(tmean, 0.70, na.rm = TRUE),
+    p90_rain  = quantile(rain,  0.70, na.rm = TRUE),
+    p90_vpd   = quantile(vpd,   0.70, na.rm = TRUE)
+  )
+
+p90_tmean <- p90_tbl$p90_tmean
+p90_rain  <- p90_tbl$p90_rain
+p90_vpd   <- p90_tbl$p90_vpd
+
+# -------------------------------------------------------------------
+# 5) FREQUÊNCIA DE DIAS ≥ P90 (por epidemia × fase)
+# -------------------------------------------------------------------
+freq_epi <- wx_win %>%
+  mutate(
+    hit_tmean = as.integer(tmean >= p90_tmean),
+    hit_rain  = as.integer(rain  >= p90_rain),
+    hit_vpd   = as.integer(vpd   >= p90_vpd)
+  ) %>%
+  group_by(epi_id, epi_year, phase) %>%
+  summarise(
+    n_days  = n(),
+    n_tmean = sum(hit_tmean, na.rm = TRUE),
+    n_rain  = sum(hit_rain,  na.rm = TRUE),
+    n_vpd   = sum(hit_vpd,   na.rm = TRUE),
+    p_tmean = n_tmean / n_days,
+    p_rain  = n_rain  / n_days,
+    p_vpd   = n_vpd   / n_days,
+    .groups = "drop"
+  )
+
+
+
+freq_epi %>% 
+ggplot(aes(y = n_rain, x =  as.factor(epi_year))) +
+  stat_halfeye(fill = "#ffc425", alpha = 0.7)+
+  #geom_point()+
+  ##geom_line()+
+  facet_wrap(~phase)+
+  coord_flip()
+
+
+freq_epi %>% 
+  group_by(epi_year,phase) %>% 
+  summarise(
+    n_tmean = mean(n_tmean),
+    n_rain = mean(n_rain),
+    n_vpd = mean(n_vpd)
+  )
+```
+
+```{r}
+library(dplyr)
+
+# ---------------- PARÂMETROS ----------------
+END_DAP <- 85
+LAG_MAX <- 70
+
+# fases definidas por "dias antes do R6"
+LATER_MAX_LAG   <- 40  # 0–40 dias antes do R6  => Later
+EARLIER_MIN_LAG <- 41  # 41–70 dias antes do R6 => Earlier
+EARLIER_MAX_LAG <- 70
+
+# ---------------- 1) Ano âncora (igual ao ano da Figura C) ----------------
+# Usa o ano do banco de epidemias (plantio/ano do estudo) 
+epi_year_tbl <- epi_use %>%
+  transmute(epi_id, epi_year = year)
+
+# ---------------- 2) Janela efetiva do DLNM + phases ----------------
+start_dpp <- END_DAP - LAG_MAX  # ex.: 15
+
+wx_win <- wx_use %>%
+  left_join(epi_year_tbl, by = "epi_id") %>%
+  filter(dpp >= start_dpp, dpp <= END_DAP) %>%
+  mutate(
+    lag_day = END_DAP - dpp
+  ) %>%
+  # GARANTIA ABSOLUTA DO INTERVALO
+  filter(lag_day >= 0, lag_day <= LAG_MAX) %>%
+  mutate(
+    phase = if_else(
+      lag_day <= LATER_MAX_LAG,
+      "Later",
+      "Earlier"
+    )
+  )
+
+
+wx_win %>%
+  group_by(epi_id, phase) %>%
+  summarise(
+    max_days = n(),
+    .groups = "drop"
+  )
+
+# ---------------- 3) P90 global (mesma referência para todos os anos) ----------------
+p90_tbl <- wx_win %>%
+  summarise(
+    p90_tmean = quantile(tmean, 0.70, na.rm = TRUE),
+    p90_rain  = quantile(rain,  0.70, na.rm = TRUE),
+    p90_vpd   = quantile(vpd,   0.70, na.rm = TRUE)
+  )
+
+p90_tmean <- p90_tbl$p90_tmean
+p90_rain  <- p90_tbl$p90_rain
+p90_vpd   <- p90_tbl$p90_vpd
+
+# ---------------- 4) Contar dias >= P90 por epidemia (interno) ----------------
+freq_epi <- wx_win %>%
+  mutate(
+    hit_tmean = tmean >= p90_tmean,
+    hit_rain  = rain  >= p90_rain,
+    hit_vpd   = vpd   >= p90_vpd
+  ) %>%
+  group_by(epi_id, epi_year, phase) %>%
+  summarise(
+    n_tmean = sum(hit_tmean, na.rm = TRUE),
+    n_rain  = sum(hit_rain,  na.rm = TRUE),
+    n_vpd   = sum(hit_vpd,   na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# ---------------- 5) AGORA SIM: média anual (saída só por ANO) ----------------
+freq_year_mean <- freq_epi %>%
+  group_by(epi_year, phase) %>%   # 👈 phase SEMPRE aqui
+  summarise(
+    n_vpd_mean = mean(n_vpd, na.rm = TRUE),
+    n_vpd_min  = min(n_vpd, na.rm = TRUE),
+    n_vpd_max  = max(n_vpd, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Resultado final: somente ano (epi_year) como fator + médias
+freq_year_mean$epi_year = freq_year_mean$epi_year-1
+
+freq_year_mean %>% 
+  filter(epi_year == 2017) %>% 
+  filter(phase == "Earlier")
+
+unique(freq_year_mean$epi_year)
+
+min(wx_use$tmean)
+mean(wx_use$tmean)
+
+library(ggdist)
+
+freq_year_mean %>% 
+ggplot(aes(y = n_vpd_mean, x =  as.factor(epi_year),  group = as.factor(epi_year))) +
+  #stat_halfeye(fill = "#ffc425", alpha = 0.7)+
+  geom_point()+
+  geom_line()+
+  facet_wrap(~phase)+
+  coord_flip()
+
+max(freq_year_mean$n_rain_mean)
+
+
+
+wx_win %>% 
+  filter(epi_id == 150)
+
 ```
 
