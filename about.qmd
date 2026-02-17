@@ -728,11 +728,13 @@ tmean_RR_second =rr_sum_t_la %>%
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-  annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  #annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
+   #        fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 27.5, xmax = 28.5, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 3, colour = "#c40000") +
+  geom_vline(xintercept = 27.5, linetype=2) +
+  geom_vline(xintercept = 28.5, linetype=2) +
+  geom_smooth(size = 3, colour = "#B2182B") +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
   theme_bw()+
@@ -797,11 +799,13 @@ tmean_RR_first = rr_sum_t_ea %>%
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
- annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 28, xmax = 29, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+ #annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
+   #        fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 29, xmax = 30.2, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 3, colour = "#C40000") +
+  geom_vline(xintercept = 29, linetype=2) +
+  geom_vline(xintercept = 30.2, linetype=2) +
+  geom_smooth(size = 3, colour = "#B2182B") +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
   theme_bw()+
@@ -810,6 +814,8 @@ ggplot(aes(x=tmean, y=PERC)) +
     axis.title.x = element_blank(),
     axis.text.x = element_blank())
 
+
+    
 tmean_RR_first
 ```
 
@@ -870,11 +876,13 @@ rain_RR_second =rr_sum_r_la %>%
  filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+ #annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
+  #         fill = "lightgreen", color = "lightgreen",alpha = .7) +
+  annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 3, colour = "#1E90FF") +
+  geom_vline(xintercept = 5, linetype=2) +
+  geom_vline(xintercept = 10, linetype=2) +
+  geom_smooth(size = 3, colour = "#2166AC") +
   labs(x="Precipitation (mm)",
        y="") +
   theme_bw()+
@@ -940,11 +948,13 @@ rain_RR_first = rr_sum_r_ea %>%
  filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-  annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 15, xmax = 20, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+  ##annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
+    #       fill = "lightgreen", color = "lightgreen",alpha = .7) +
+   annotate("rect", xmin = 15, xmax = 21, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_smooth(size = 3, colour = "#1E90FF") +
+  geom_vline(xintercept = 15, linetype=2) +
+  geom_vline(xintercept = 21, linetype=2) +
+  geom_smooth(size = 3, colour = "#2166AC") +
   labs(x="Precipitation (mm)",
        y="") +
   theme_bw()+
@@ -1015,10 +1025,12 @@ vpd_RR_second =rr_sum_v_la %>%
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen",alpha = .7) +
-   annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral",alpha = .7) +
+##annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
+  ##         fill = "lightgreen", color = "lightgreen",alpha = .7) +
+   annotate("rect", xmin = 1.3, xmax = 1.5, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
+  geom_vline(xintercept = 1.3, linetype=2) +
+  geom_vline(xintercept = 1.5, linetype=2) +
   geom_smooth(size = 3, colour = "green4") +
   labs(x="VPD (kPa)",
        y="") +
@@ -1091,10 +1103,12 @@ vpd_RR_first = rr_sum_v_ea %>%
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
-annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
-           fill = "lightgreen", color = "lightgreen", alpha = .7) +
-  annotate("rect", xmin = 1.5, xmax = 2, ymin = -Inf, ymax = Inf, fill = "lightcoral", color = "lightcoral", alpha = .7) +
+##annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
+  #         fill = "lightgreen", color = "lightgreen", alpha = .7) +
+  annotate("rect", xmin = 0.66, xmax = 0.80, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
+  geom_vline(xintercept = 0.66, linetype=2) +
+  geom_vline(xintercept = 0.80, linetype=2) +
   geom_smooth(size = 3, colour = "green4") +
   labs(x="Precipitation (mm)",
        y="") +
@@ -1472,7 +1486,7 @@ band_df <- bind_rows(lapply(names(eta_band), function(nm) {
 
 sev_tmean = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, color = "#c40000") +
+  geom_smooth(size = 2, se = F, color = "#B2182B") +
   #scale_color_brewer(palette = "Dark2") +
   labs(
     x = "Temperature (°C)",
@@ -1755,7 +1769,7 @@ band_df <- bind_rows(lapply(names(eta_band), function(nm) {
 
 sev_rain = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, colour = "#1E90FF") +
+  geom_smooth(size = 2, se = F, colour = "#2166AC") +
   #scale_color_brewer(palette = "Dark2") +
   labs(
     x = "Precipitation (mm)",
@@ -1900,6 +1914,162 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
   )
 
 vpd_movel
+```
+##### Severity
+
+```{r}
+
+# Pacotes
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+# Se quiser isolinhas com rótulo: remotes::install_github("teunbrand/ggtextpath")
+# library(ggtextpath) # para geom_textcontour (opcional)
+
+# --------------------------------------------------------------
+# Entradas esperadas já existentes no seu ambiente:
+# - fit_sel         : modelo glmmTMB ajustado com cb_*(tmean, vpd, rain, ...)
+# - cb_templates    : lista com os crossbasis (p.ex., cb_templates[["tmean"]])
+# - wx_use          : lista com séries originais (p.ex., wx_use[["tmean"]])
+# - LAG_MAX         : lag máximo usado ao construir os crossbasis (>= 70)
+# --------------------------------------------------------------
+
+# ------------ 1) Parâmetros do heatmap -------------
+var      <- "vpd"                     # variável-alvo
+cb       <- cb_templates[[var]]         # crossbasis correspondente
+x_all    <- wx_use[[var]]
+P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
+at_vals  <- seq(0.66, 2, length.out = 1000)
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+
+# ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
+cf <- coef(summary(fit_sel))$cond[, 1]
+vc <- vcov(fit_sel)$cond
+
+pref     <- paste0("^cb_", var, "_")
+idx_beta <- grep(pref, names(cf))
+stopifnot(length(idx_beta) > 0)
+beta     <- cf[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc))
+idx_cols <- grep(pref, colnames(vc))
+V        <- vc[idx_rows, idx_cols, drop = FALSE]
+
+# Checagem de consistência com o crossbasis
+stopifnot(length(beta) == ncol(cb))
+stopifnot(nrow(V) == ncol(cb), ncol(V) == ncol(cb))
+
+# ------------ 3) crosspred em todos os at_vals, lag móvel -------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50,
+  bylag = 1
+)
+
+# Matriz no preditor linear: linhas = tmean (at_vals), colunas = lags
+mf <- cp$matfit
+
+# Recuperar e ordenar os índices de lag
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf)-1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf  <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# Limitar à faixa de interesse (0–70 dias)
+lag_max_plot <- min(70, max(lag_idx))
+keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf           <- mf[, keep_cols, drop = FALSE]
+lag_idx      <- lag_idx[keep_cols]
+
+# ------------ 4) Converter Δη acumulado (0→L) em sev final -------------
+# Baseline: mesmo critério do seu Script 2 (média das predições)
+# >>> Se quiser apenas efeitos fixos, troque pela linha comentada.
+sev_base <- mean(predict(fit_sel, type = "response"))
+# sev_base <- mean(predict(fit_sel, type = "response", re.form = NA))  # apenas FE
+
+# cumsum ao longo do eixo de lag produz o acúmulo 0→L para cada tmean
+mf_cum <- t(apply(mf, 1, cumsum))  # dimensões: length(at_vals) x length(lag_idx)
+
+# Mapear para severidade final (escala 0–1), depois para %
+logit <- function(p) qlogis(p)
+ilogit <- function(x) plogis(x)
+
+SEV_mat <- ilogit(logit(sev_base) + mf_cum) # (0–1)
+SEVpct_mat <- 100 * SEV_mat                 # (0–100%)
+
+# ------------ 5) Data frame "long" para o heatmap -------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+df_sev <- df_sev |>
+  mutate(tmean_val = at_vals) |>
+  pivot_longer(
+    cols = starts_with("lag_"),
+    names_to = "lag",
+    values_to = "SEV_pct"
+  ) |>
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+
+# --------------------------------------------------------------
+# (OPCIONAL) 7) Versão por janelas FIXAS (p.ex., 0–40 e 41–70)
+# Produz uma curva de SEV_final vs tmean para cada janela
+# --------------------------------------------------------------
+
+
+make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
+  cols <- which(lag_idx %in% band)
+  if (length(cols) == 0) return(NA_real_)
+  sum(mf_row_by_lag[cols], na.rm = TRUE)
+}
+
+bands <- list(`Later` = 0:40, `Earlier` = 41:70)
+eta_band <- lapply(bands, function(bd) {
+  apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
+})
+band_df <- bind_rows(lapply(names(eta_band), function(nm) {
+  tibble(
+    tmean_val = at_vals,
+    band      = nm,
+    SEV_pct   = 100 * ilogit(logit(sev_base) + eta_band[[nm]])
+  )
+}), .id = NULL)
+
+sev_vpd = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
+  #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
+  geom_smooth(size = 2, se = F, colour = "green4") +
+  #scale_color_brewer(palette = "Dark2") +
+  labs(
+    x = "VPD (kPa)",
+    y = "Severity (%)",
+    linetype = "Phases") +
+  theme_bw(base_size = 12) +
+  theme(
+    legend.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10))
+
+sev_vpd
+```
+
+```{r}
+tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
+
+ggsave("fig/RR_movel_severity.png", dpi = 600, width = 10, height = 6)
+
+#ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
 ```
 
 ```{r}
@@ -2524,162 +2694,6 @@ cl <- factor(km$cluster)
 
 ```
 
-##### Severity
-
-```{r}
-
-# Pacotes
-library(dlnm)
-library(glmmTMB)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(scales)
-# Se quiser isolinhas com rótulo: remotes::install_github("teunbrand/ggtextpath")
-# library(ggtextpath) # para geom_textcontour (opcional)
-
-# --------------------------------------------------------------
-# Entradas esperadas já existentes no seu ambiente:
-# - fit_sel         : modelo glmmTMB ajustado com cb_*(tmean, vpd, rain, ...)
-# - cb_templates    : lista com os crossbasis (p.ex., cb_templates[["tmean"]])
-# - wx_use          : lista com séries originais (p.ex., wx_use[["tmean"]])
-# - LAG_MAX         : lag máximo usado ao construir os crossbasis (>= 70)
-# --------------------------------------------------------------
-
-# ------------ 1) Parâmetros do heatmap -------------
-var      <- "vpd"                     # variável-alvo
-cb       <- cb_templates[[var]]         # crossbasis correspondente
-x_all    <- wx_use[[var]]
-P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
-
-# Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
-grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
-at_vals  <- seq(0.66, 2, length.out = 1000)
-at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
-
-# ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
-cf <- coef(summary(fit_sel))$cond[, 1]
-vc <- vcov(fit_sel)$cond
-
-pref     <- paste0("^cb_", var, "_")
-idx_beta <- grep(pref, names(cf))
-stopifnot(length(idx_beta) > 0)
-beta     <- cf[idx_beta]
-
-idx_rows <- grep(pref, rownames(vc))
-idx_cols <- grep(pref, colnames(vc))
-V        <- vc[idx_rows, idx_cols, drop = FALSE]
-
-# Checagem de consistência com o crossbasis
-stopifnot(length(beta) == ncol(cb))
-stopifnot(nrow(V) == ncol(cb), ncol(V) == ncol(cb))
-
-# ------------ 3) crosspred em todos os at_vals, lag móvel -------------
-cp <- dlnm::crosspred(
-  cb,
-  coef  = beta,
-  vcov  = V,
-  at    = at_vals,
-  cen   = P50,
-  bylag = 1
-)
-
-# Matriz no preditor linear: linhas = tmean (at_vals), colunas = lags
-mf <- cp$matfit
-
-# Recuperar e ordenar os índices de lag
-lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
-if (anyNA(lag_idx)) {
-  lag_idx <- 0:(ncol(mf)-1)
-  colnames(mf) <- paste0("lag", lag_idx)
-}
-ord <- order(lag_idx)
-mf  <- mf[, ord, drop = FALSE]
-lag_idx <- lag_idx[ord]
-
-# Limitar à faixa de interesse (0–70 dias)
-lag_max_plot <- min(70, max(lag_idx))
-keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
-mf           <- mf[, keep_cols, drop = FALSE]
-lag_idx      <- lag_idx[keep_cols]
-
-# ------------ 4) Converter Δη acumulado (0→L) em sev final -------------
-# Baseline: mesmo critério do seu Script 2 (média das predições)
-# >>> Se quiser apenas efeitos fixos, troque pela linha comentada.
-sev_base <- mean(predict(fit_sel, type = "response"))
-# sev_base <- mean(predict(fit_sel, type = "response", re.form = NA))  # apenas FE
-
-# cumsum ao longo do eixo de lag produz o acúmulo 0→L para cada tmean
-mf_cum <- t(apply(mf, 1, cumsum))  # dimensões: length(at_vals) x length(lag_idx)
-
-# Mapear para severidade final (escala 0–1), depois para %
-logit <- function(p) qlogis(p)
-ilogit <- function(x) plogis(x)
-
-SEV_mat <- ilogit(logit(sev_base) + mf_cum) # (0–1)
-SEVpct_mat <- 100 * SEV_mat                 # (0–100%)
-
-# ------------ 5) Data frame "long" para o heatmap -------------
-df_sev <- as.data.frame(SEVpct_mat)
-colnames(df_sev) <- paste0("lag_", lag_idx)
-df_sev <- df_sev |>
-  mutate(tmean_val = at_vals) |>
-  pivot_longer(
-    cols = starts_with("lag_"),
-    names_to = "lag",
-    values_to = "SEV_pct"
-  ) |>
-  mutate(lag = as.integer(gsub("lag_", "", lag)))
-
-
-# --------------------------------------------------------------
-# (OPCIONAL) 7) Versão por janelas FIXAS (p.ex., 0–40 e 41–70)
-# Produz uma curva de SEV_final vs tmean para cada janela
-# --------------------------------------------------------------
-
-
-make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
-  cols <- which(lag_idx %in% band)
-  if (length(cols) == 0) return(NA_real_)
-  sum(mf_row_by_lag[cols], na.rm = TRUE)
-}
-
-bands <- list(`Later` = 0:40, `Earlier` = 41:70)
-eta_band <- lapply(bands, function(bd) {
-  apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
-})
-band_df <- bind_rows(lapply(names(eta_band), function(nm) {
-  tibble(
-    tmean_val = at_vals,
-    band      = nm,
-    SEV_pct   = 100 * ilogit(logit(sev_base) + eta_band[[nm]])
-  )
-}), .id = NULL)
-
-sev_vpd = ggplot(band_df, aes(tmean_val, SEV_pct, linetype = band)) +
-  #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, colour = "green4") +
-  #scale_color_brewer(palette = "Dark2") +
-  labs(
-    x = "VPD (kPa)",
-    y = "Severity (%)",
-    linetype = "Phases") +
-  theme_bw(base_size = 12) +
-  theme(
-    legend.title = element_text(face = "bold"),
-    axis.title = element_text(face = "bold", size = 12),
-    axis.text  = element_text(size = 10))
-
-sev_vpd
-```
-
-```{r}
-tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
-
-ggsave("fig/RR_movel_severity.png", dpi = 600, width = 10, height = 6)
-
-#ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
-```
 
 ### Severidade
 
@@ -3437,7 +3451,7 @@ tmean_plot = ggplot() +
   geom_smooth(
     data = wx_use %>% filter(dpp <= 85),
     aes(dpp, tmean, group = epi_id),
-    color = "firebrick",
+    color = "#B2182B",
     alpha = 0.1,
     linewidth = 0.6, se = F
   ) +
@@ -3513,7 +3527,7 @@ rain_plot = ggplot() +
   geom_smooth(
     data = wx_use %>% filter(dpp <= 85),
     aes(dpp, rain, group = epi_id),
-    color = "#1E90FF",
+    color = "#2166AC",
     alpha = 0.1,
     linewidth = 0.6, se = F
   ) +
