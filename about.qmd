@@ -33,12 +33,14 @@ set.seed(20251218)
 
 # ------------------------------- PARÂMETROS ----------------------------------
 END_DAP   <- 85     # 80, 85 ou 90 (ponto de avaliação, p.ex. ~R6)
-LAG_MAX   <- 70     # lags máximos (dias antes de END_DAP)
+LAG_MAX   <- 85     # lags máximos (dias antes de END_DAP)
 DF_VAR    <- 4      # flexibilidade na dimensão de exposição (ns)
 DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
 SEPARATOR <- LAG_MAX
 
-VARS <- c("rain","tmean","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
+VARS <- c("tmax","rain","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
+#VARS <- c("rain") 
+#VARS <- c("rain_sum","vpd", "temperature_2m_mean")
 
 LAG_BAND_A <- 0:40
 LAG_BAND_B <- 41:LAG_MAX
@@ -49,7 +51,6 @@ AT_PROBS <- c(0.50, 0.75)
 CHAINS <- 4
 ITER   <- 4000
 CORES  <- 4
-
 ```
 
 ## Data importation and pre organization
@@ -63,6 +64,13 @@ epi  <- read_csv("data/targetspot_epidemics_clean.csv", show_col_types = FALSE)
 wx   <- read_csv("data/targetspot_weather_long_0_90dap.csv", show_col_types = FALSE)
 ends <- read_csv("data/targetspot_assessment_endpoints_80_85_90dap.csv", show_col_types = FALSE)
 
+wx %>%
+ count(epi_id, dpp) %>%
+  filter(n > 1)
+
+
+wx <- wx %>%
+  distinct(epi_id, dpp, .keep_all = TRUE)
 
 stopifnot(END_DAP %in% unique(ends$end_dap))
 
@@ -81,6 +89,8 @@ wx_use <- wx |>
   filter(dpp >= 0, dpp <= END_DAP) |>
   semi_join(epi_use, by = "epi_id") |>
   arrange(epi_id, dpp)
+
+
 
 # Saturação de vapor e VPD (kPa)
 es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
@@ -106,6 +116,68 @@ if (any(epi_use$sev <= 0 | epi_use$sev >= 1)) {
 }
 
 ```
+
+
+
+
+```{r}
+
+epi <- readxl::read_xlsx("data/ts_check.xlsx")
+
+epi = epi %>% 
+  mutate(
+    PD85 = planting_date+85
+  )
+
+epi$planting_date = as.Date(epi$planting_date)
+
+epi = epi %>% 
+  mutate(
+    PD85 = planting_date + 85
+  )
+
+epi_use <- epi |>
+  rename(
+    sev = mean_sev
+  ) |>
+  filter(!is.na(sev)) |>
+  mutate(
+    planting_date = as.Date(planting_date, origin = "1899-12-30"),
+    epi_id = row_number(),
+    siteyear = paste0(location, "_", year)
+  )
+
+wx = get_era5(
+  data = epi_use,
+  days_around = "85",
+  date_col = "planting_date",
+  study_col = "epi_id",
+  pars = c("temperature_2m", "relative_humidity_2m", "precipitation", "dewpoint_2m"),
+  models = NULL,
+  direction = "forth"
+)
+
+
+colnames(wx) = c("planting_date", "tmean","tmax","tmin","rh","rain","t2mdew","longitude","latitude","epi_id")
+
+
+unique(wx$epi_id)
+
+wx_use <- epi_use |>
+  select(study,year,location,epi_id) %>% 
+  left_join(wx, by = "epi_id")
+
+wx_use$dpp <- rep(0:85, times = 254)
+
+
+es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
+wx_use <- wx_use |>
+  mutate(vpd = es(tmean) * (1 - rh / 100))
+
+wx_use = wx_use %>% 
+  filter(dpp >=15)
+```
+
 
 ## Templates to cross-basis (shared)
 
@@ -274,9 +346,13 @@ names(X_list) <- VARS
 X <- reduce(X_list, left_join, by = "epi_id")
 
 dat <- epi_use |>
-dplyr::select(epi_id, sev, siteyear, year, location, state, lat, lon, planting_date, assessment_date_assumed) |>
+dplyr::select(epi_id, sev, siteyear, year, location, state, latitude, longitude, planting_date, PD85) |>
   left_join(X, by = "epi_id")
 
+
+#dat <- epi_use |>
+#dplyr::select(epi_id, sev, siteyear, year, location, state, lat, longitude, planting_date) |>
+#  left_join(X, by = "epi_id")
 ```
 
 This step converts the full daily exposure histories into epidemic-level predictors that retain the cumulative and delayed effects of climate encoded by the DLNM. The transformation allows the distributed lag structure to be estimated using a single observation per epidemic while maintaining biological interpretability of the climatic effects across time.
@@ -344,12 +420,15 @@ cb_terms <- paste(names(dat)[grepl("^cb_", names(dat))], collapse = " + ")
 fml <- as.formula(paste0("sev ~ 1 + (1|siteyear) + ", cb_terms))
 
 library(glmmTMB)
-
+dat$sev  = dat$sev/100
+  
+  
 fit_tmb <- glmmTMB( #fit_tmb
   formula = fml,
   data = dat,
   family = beta_family(link = "logit")
 )
+
 
 summary(fit_tmb)
 ```
@@ -677,7 +756,7 @@ $$
 ##### Later window (0-40)
 
 ```{r}
-var <- "tmean"
+var <- "tmax"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -725,7 +804,7 @@ rr_sum_t_la <- data.frame(
   )
 
 tmean_RR_second =rr_sum_t_la %>% 
-  filter(tmean >=25) %>% 
+  filter(tmean >=29) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
@@ -748,7 +827,7 @@ tmean_RR_second
 ##### Ealier window (41-70)
 
 ```{r}
-var <- "tmean"
+var <- "tmax"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -781,7 +860,7 @@ mf <- cp$matfit     # matriz: rows = grid, cols = lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
-colsA <- which(lag_idx %in% 41:70)
+colsA <- which(lag_idx %in% 41:85)
 
 # efeito cumulativo para CADA temperatura do grid
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
@@ -796,7 +875,7 @@ rr_sum_t_ea <- data.frame(
   )
 
 tmean_RR_first = rr_sum_t_ea %>% 
-  filter(tmean >=25) %>% 
+  filter(tmean >=29) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
@@ -874,7 +953,7 @@ rr_sum_r_la <- data.frame(
 
 rain_RR_second =rr_sum_r_la %>% 
   #filter(tmean >=25) %>% 
- filter(tmean >=5) %>% 
+ #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
  #annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
@@ -930,7 +1009,7 @@ mf <- cp$matfit     # matriz: rows = grid, cols = lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
-colsA <- which(lag_idx %in% 41:70)
+colsA <- which(lag_idx %in% 41:85)
 
 # efeito cumulativo para CADA temperatura do grid
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
@@ -1025,6 +1104,7 @@ vpd_RR_second =rr_sum_v_la %>%
   #filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
+  #filter(tmean >=82) %>%
 ggplot(aes(x=tmean, y=PERC)) +
 ##annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
   ##         fill = "lightgreen", color = "lightgreen",alpha = .7) +
@@ -1082,7 +1162,7 @@ mf <- cp$matfit     # matriz: rows = grid, cols = lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
-colsA <- which(lag_idx %in% 41:70)
+colsA <- which(lag_idx %in% 41:85)
 
 # efeito cumulativo para CADA temperatura do grid
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
@@ -3684,6 +3764,9 @@ wx_win <- wx_use2 %>%
     )
   )
 
+wx_win <- wx_win %>%
+  distinct(epi_id, epi_year, dpp, .keep_all = TRUE)
+
 # (checagem opcional)
 # wx_win %>% count(phase, lag_day) %>% arrange(phase, lag_day)
 
@@ -3712,26 +3795,26 @@ freq_epi <- wx_win %>%
   ) %>%
   group_by(epi_id, epi_year, phase) %>%
   summarise(
-    n_days  = n(),
+   # n_days  = n(),
     n_tmean = sum(hit_tmean, na.rm = TRUE),
     n_rain  = sum(hit_rain,  na.rm = TRUE),
     n_vpd   = sum(hit_vpd,   na.rm = TRUE),
-    p_tmean = n_tmean / n_days,
-    p_rain  = n_rain  / n_days,
-    p_vpd   = n_vpd   / n_days,
     .groups = "drop"
   )
 
 
 
 freq_epi %>% 
-ggplot(aes(y = n_rain, x =  as.factor(epi_year))) +
+ggplot(aes(y = n_vpd, x =  as.factor(epi_year))) +
   stat_halfeye(fill = "#ffc425", alpha = 0.7)+
   #geom_point()+
   ##geom_line()+
   facet_wrap(~phase)+
   coord_flip()
 
+unique(freq_epi$epi_year)
+
+freq_epi$epi_year = freq_epi$epi_year-1
 
 freq_epi %>% 
   group_by(epi_year,phase) %>% 
@@ -3740,117 +3823,20 @@ freq_epi %>%
     n_rain = mean(n_rain),
     n_vpd = mean(n_vpd)
   )
-```
 
-```{r}
-library(dplyr)
-
-# ---------------- PARÂMETROS ----------------
-END_DAP <- 85
-LAG_MAX <- 70
-
-# fases definidas por "dias antes do R6"
-LATER_MAX_LAG   <- 40  # 0–40 dias antes do R6  => Later
-EARLIER_MIN_LAG <- 41  # 41–70 dias antes do R6 => Earlier
-EARLIER_MAX_LAG <- 70
-
-# ---------------- 1) Ano âncora (igual ao ano da Figura C) ----------------
-# Usa o ano do banco de epidemias (plantio/ano do estudo) 
-epi_year_tbl <- epi_use %>%
-  transmute(epi_id, epi_year = year)
-
-# ---------------- 2) Janela efetiva do DLNM + phases ----------------
-start_dpp <- END_DAP - LAG_MAX  # ex.: 15
-
-wx_win <- wx_use %>%
-  left_join(epi_year_tbl, by = "epi_id") %>%
-  filter(dpp >= start_dpp, dpp <= END_DAP) %>%
-  mutate(
-    lag_day = END_DAP - dpp
-  ) %>%
-  # GARANTIA ABSOLUTA DO INTERVALO
-  filter(lag_day >= 0, lag_day <= LAG_MAX) %>%
-  mutate(
-    phase = if_else(
-      lag_day <= LATER_MAX_LAG,
-      "Later",
-      "Earlier"
-    )
-  )
-
-
-wx_win %>%
-  group_by(epi_id, phase) %>%
-  summarise(
-    max_days = n(),
-    .groups = "drop"
-  )
-
-# ---------------- 3) P90 global (mesma referência para todos os anos) ----------------
-p90_tbl <- wx_win %>%
-  summarise(
-    p90_tmean = quantile(tmean, 0.70, na.rm = TRUE),
-    p90_rain  = quantile(rain,  0.70, na.rm = TRUE),
-    p90_vpd   = quantile(vpd,   0.70, na.rm = TRUE)
-  )
-
-p90_tmean <- p90_tbl$p90_tmean
-p90_rain  <- p90_tbl$p90_rain
-p90_vpd   <- p90_tbl$p90_vpd
-
-# ---------------- 4) Contar dias >= P90 por epidemia (interno) ----------------
-freq_epi <- wx_win %>%
-  mutate(
-    hit_tmean = tmean >= p90_tmean,
-    hit_rain  = rain  >= p90_rain,
-    hit_vpd   = vpd   >= p90_vpd
-  ) %>%
-  group_by(epi_id, epi_year, phase) %>%
-  summarise(
-    n_tmean = sum(hit_tmean, na.rm = TRUE),
-    n_rain  = sum(hit_rain,  na.rm = TRUE),
-    n_vpd   = sum(hit_vpd,   na.rm = TRUE),
-    .groups = "drop"
-  )
-
-# ---------------- 5) AGORA SIM: média anual (saída só por ANO) ----------------
-freq_year_mean <- freq_epi %>%
-  group_by(epi_year, phase) %>%   # 👈 phase SEMPRE aqui
-  summarise(
-    n_vpd_mean = mean(n_vpd, na.rm = TRUE),
-    n_vpd_min  = min(n_vpd, na.rm = TRUE),
-    n_vpd_max  = max(n_vpd, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-# Resultado final: somente ano (epi_year) como fator + médias
-freq_year_mean$epi_year = freq_year_mean$epi_year-1
-
-freq_year_mean %>% 
-  filter(epi_year == 2017) %>% 
-  filter(phase == "Earlier")
-
-unique(freq_year_mean$epi_year)
-
-min(wx_use$tmean)
-mean(wx_use$tmean)
-
-library(ggdist)
-
-freq_year_mean %>% 
-ggplot(aes(y = n_vpd_mean, x =  as.factor(epi_year),  group = as.factor(epi_year))) +
-  #stat_halfeye(fill = "#ffc425", alpha = 0.7)+
-  geom_point()+
-  geom_line()+
-  facet_wrap(~phase)+
-  coord_flip()
-
-max(freq_year_mean$n_rain_mean)
-
-
+max(freq_epi$n_vpd)
+unique(wx_win$epi_id)
+unique(wx_win$lag_day)
 
 wx_win %>% 
-  filter(epi_id == 150)
+  ggplot(aes(lag_day))+
+  geom_histogram()
+
+writexl::write_xlsx(wx_win,"data/wx_win.xlsx")
+
 
 ```
+
+
+
 
