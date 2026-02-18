@@ -3837,6 +3837,154 @@ writexl::write_xlsx(wx_win,"data/wx_win.xlsx")
 
 ```
 
+```{r}
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(dlnm)
+library(glmmTMB)
+library(epiR)
+
+# ---------------- PARÂMETROS GERAIS ----------------
+END_DAP   <- 85
+LAG_MAX   <- 85
+SEPARATOR <- LAG_MAX
+
+LAG_BAND_A <- 0:40
+LAG_BAND_B <- 41:LAG_MAX
+
+# grades de teste
+df_var_grid <- c(3, 4, 5)
+df_lag_grid <- c(3, 4, 5)
+
+VARS_ALL <- c("tmax", "rain", "vpd","rh","tmean","t2mdew","tmin")
+
+# ---------------------------------------------------
+# FUNÇÕES AUXILIARES
+# ---------------------------------------------------
+
+build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
+  ids <- unique(wx_long$epi_id)
+  unlist(lapply(ids, function(id) {
+    v <- wx_long |>
+      filter(epi_id == id) |>
+      arrange(dpp) |>
+      pull(.data[[var]])
+    c(v, rep(NA_real_, sep_n))
+  }))
+}
+
+extract_last_cb_row <- function(x, cb_template) {
+  cb <- crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cb[length(x), ])
+}
+
+build_design_for_var <- function(wx_long, var, cb_template, prefix) {
+  X <- wx_long |>
+    group_by(epi_id) |>
+    summarise(cb = list(extract_last_cb_row(.data[[var]], cb_template)),
+              .groups = "drop")
+  p  <- length(X$cb[[1]])
+  nm <- paste0(prefix, seq_len(p))
+  X |>
+    mutate(cb = lapply(cb, setNames, nm)) |>
+    unnest_wider(cb)
+}
+
+# ---------------------------------------------------
+# LOOP PRINCIPAL
+# ---------------------------------------------------
+
+results <- list()
+model_id <- 1
+
+for (DF_VAR in df_var_grid) {
+  for (DF_LAG in df_lag_grid) {
+    
+    for (k in 1:length(VARS_ALL)) {
+      var_sets <- combn(VARS_ALL, k, simplify = FALSE)
+      
+      for (VARS in var_sets) {
+        
+        # ---- construir cross-basis ----
+        cb_templates <- list()
+        for (v in VARS) {
+          x_pool <- build_pooled_series(wx_use, v)
+          cb_templates[[v]] <- crossbasis(
+            x_pool,
+            lag = LAG_MAX,
+            argvar = list(fun = "ns", df = DF_VAR),
+            arglag = list(fun = "ns", df = DF_LAG)
+          )
+        }
+        
+        # ---- design matrix ----
+        X_list <- map(
+          VARS,
+          ~ build_design_for_var(
+            wx_use,
+            .x,
+            cb_templates[[.x]],
+            prefix = paste0("cb_", .x, "_")
+          )
+        )
+        
+        X <- reduce(X_list, left_join, by = "epi_id")
+        
+        dat <- epi_use |>
+          select(epi_id, sev, siteyear) |>
+          left_join(X, by = "epi_id") |>
+          mutate(sev = sev / 100)
+        
+        cb_terms <- paste(names(dat)[grepl("^cb_", names(dat))], collapse = " + ")
+        fml <- as.formula(paste0("sev ~ 1 + (1|siteyear) + ", cb_terms))
+        
+        # ---- ajuste do modelo ----
+        fit <- try(
+          glmmTMB(
+            formula = fml,
+            data = dat,
+            family = beta_family(link = "logit")
+          ),
+          silent = TRUE
+        )
+        
+        if (inherits(fit, "try-error")) next
+        
+        pred <- predict(fit, type = "response")
+        ccc  <- epi.ccc(dat$sev, pred)
+        
+        results[[model_id]] <- tibble(
+          model_id = model_id,
+          DF_VAR   = DF_VAR,
+          DF_LAG   = DF_LAG,
+          vars     = paste(VARS, collapse = " + "),
+          CCC      = ccc$rho.c[1],
+          Cb       = ccc$C.b[1],
+          rho      = ccc$rho[1]
+        )
+        
+        model_id <- model_id + 1
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------
+# RESULTADOS FINAIS
+# ---------------------------------------------------
+
+results_df <- bind_rows(results) |>
+  arrange(desc(CCC))
+
+top5_models <- results_df |> slice(1:5)
+
+  top5_models$CCC
+```
 
 
 
