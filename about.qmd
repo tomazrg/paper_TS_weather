@@ -38,7 +38,7 @@ DF_VAR    <- 4      # flexibilidade na dimensão de exposição (ns)
 DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
 SEPARATOR <- LAG_MAX
 
-VARS <- c("tmax","rain","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
+VARS <- c("tmax","rain_cum","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
 #VARS <- c("rain") 
 #VARS <- c("rain_sum","vpd", "temperature_2m_mean")
 
@@ -174,8 +174,16 @@ es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
 wx_use <- wx_use |>
   mutate(vpd = es(tmean) * (1 - rh / 100))
 
-wx_use = wx_use %>% 
-  filter(dpp >=15)
+#wx_use = wx_use %>% 
+  #filter(dpp >=15)
+
+library(dplyr)
+
+wx_use <- wx_use |>
+  arrange(epi_id, planting_date) |>
+  group_by(epi_id) |>
+  mutate(rain_cum = cumsum(rain)) |>
+  ungroup()
 ```
 
 
@@ -804,7 +812,7 @@ rr_sum_t_la <- data.frame(
   )
 
 tmean_RR_second =rr_sum_t_la %>% 
-  filter(tmean >=29) %>% 
+  filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
@@ -904,7 +912,7 @@ tmean_RR_first
 ##### Later window (0-40)
 
 ```{r}
-var <- "rain"
+var <- "rain_cum"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -976,7 +984,7 @@ rain_RR_second
 ##### Ealier window (41-70)
 
 ```{r}
-var <- "rain"
+var <- "rain_cum"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -1104,7 +1112,7 @@ vpd_RR_second =rr_sum_v_la %>%
   #filter(tmean >=25) %>% 
  #filter(tmean >=5) %>% 
  filter(tmean >=0.66) %>%
-  #filter(tmean >=82) %>%
+ # filter(tmean >=81) %>%
 ggplot(aes(x=tmean, y=PERC)) +
 ##annotate("rect", xmin = 0.66, xmax = 1, ymin = -Inf, ymax = Inf,
   ##         fill = "lightgreen", color = "lightgreen",alpha = .7) +
@@ -1423,8 +1431,10 @@ tmean_movel
 ##### Severity
 
 ```{r}
-cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
+cb_cols <- names(dat)[grepl("^cb_(tmax|vpd|rain_cum)_", names(dat))]
 fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
+
+dat$sev  = dat$sev/100
 
 fit_sel <- glmmTMB::glmmTMB(
   fml_sel, data = dat,
@@ -1455,14 +1465,14 @@ library(scales)
 # --------------------------------------------------------------
 
 # ------------ 1) Parâmetros do heatmap -------------
-var      <- "tmean"                     # variável-alvo
+var      <- "tmax"                     # variável-alvo
 cb       <- cb_templates[[var]]         # crossbasis correspondente
 x_all    <- wx_use[[var]]
 P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
 # Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
 grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
-at_vals  <- seq(25, 30, length.out = 1000)
+at_vals  <- seq(28, 32, length.out = 1000)
 at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
 
 # ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
@@ -1595,7 +1605,7 @@ library(tidyr)
 # 1) EXTRAIR COEFICIENTES
 # ==============================================================
 
-var <- "rain"
+var <- "rain_cum"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
@@ -1739,14 +1749,14 @@ library(scales)
 # --------------------------------------------------------------
 
 # ------------ 1) Parâmetros do heatmap -------------
-var      <- "rain"                     # variável-alvo
+var      <- "rain_cum"                     # variável-alvo
 cb       <- cb_templates[[var]]         # crossbasis correspondente
 x_all    <- wx_use[[var]]
 P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
 # Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
 grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
-at_vals  <- seq(5, 20, length.out = 1000)
+at_vals  <- seq(0, 600, length.out = 1000)
 at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
 
 # ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
@@ -2026,7 +2036,7 @@ P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
 # Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
 grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
-at_vals  <- seq(0.66, 2, length.out = 1000)
+at_vals  <- seq(0.66, 1.5, length.out = 1000)
 at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
 
 # ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
@@ -3981,9 +3991,18 @@ for (DF_VAR in df_var_grid) {
 results_df <- bind_rows(results) |>
   arrange(desc(CCC))
 
-top5_models <- results_df |> slice(1:5)
+top5_models <- results_df |> slice(1:20)
 
   top5_models$CCC
+  results_df$CCC1 = results_df$CCC$est
+  writexl::write_xlsx(results_df,"data/results_df.xlsx")
+  
+  results_df %>% 
+    ggplot(aes(Cb))+
+    geom_histogram()
+  
+  results_df %>% 
+    filter(CCC >=0.80)
 ```
 
 
