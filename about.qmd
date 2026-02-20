@@ -39,6 +39,8 @@ DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
 SEPARATOR <- LAG_MAX
 
 VARS <- c("tmax","rain_cum","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
+
+#VARS <- c("tmax" , "rh" , "tmean" , "rain_cum")
 #VARS <- c("rain") 
 #VARS <- c("rain_sum","vpd", "temperature_2m_mean")
 
@@ -184,6 +186,8 @@ wx_use <- wx_use |>
   group_by(epi_id) |>
   mutate(rain_cum = cumsum(rain)) |>
   ungroup()
+
+writexl::write_xlsx(wx_use,"data/ERA5_weather.xlsx")
 ```
 
 
@@ -812,16 +816,16 @@ rr_sum_t_la <- data.frame(
   )
 
 tmean_RR_second =rr_sum_t_la %>% 
-  filter(tmean >=25) %>% 
+  filter(tmean >=29) %>% 
  #filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
   #annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
    #        fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 27.5, xmax = 28.5, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
+  annotate("rect", xmin = 31.5, xmax = 32.5, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_vline(xintercept = 27.5, linetype=2) +
-  geom_vline(xintercept = 28.5, linetype=2) +
+  geom_vline(xintercept = 31.5, linetype=2) +
+  geom_vline(xintercept = 32.5, linetype=2) +
   geom_smooth(size = 3, colour = "#B2182B") +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
@@ -889,10 +893,10 @@ tmean_RR_first = rr_sum_t_ea %>%
 ggplot(aes(x=tmean, y=PERC)) +
  #annotate("rect", xmin = 25, xmax = 26, ymin = -Inf, ymax = Inf,
    #        fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 29, xmax = 30.2, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
+  annotate("rect", xmin = 32, xmax = 34, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_vline(xintercept = 29, linetype=2) +
-  geom_vline(xintercept = 30.2, linetype=2) +
+  geom_vline(xintercept = 32, linetype=2) +
+  geom_vline(xintercept = 34, linetype=2) +
   geom_smooth(size = 3, colour = "#B2182B") +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
@@ -961,15 +965,15 @@ rr_sum_r_la <- data.frame(
 
 rain_RR_second =rr_sum_r_la %>% 
   #filter(tmean >=25) %>% 
- #filter(tmean >=5) %>% 
+ filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
  #annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
   #         fill = "lightgreen", color = "lightgreen",alpha = .7) +
-  annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
+  annotate("rect", xmin = 300, xmax = 600, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_vline(xintercept = 5, linetype=2) +
-  geom_vline(xintercept = 10, linetype=2) +
+  geom_vline(xintercept = 300, linetype=2) +
+  geom_vline(xintercept = 600, linetype=2) +
   geom_smooth(size = 3, colour = "#2166AC") +
   labs(x="Precipitation (mm)",
        y="") +
@@ -1038,10 +1042,10 @@ rain_RR_first = rr_sum_r_ea %>%
 ggplot(aes(x=tmean, y=PERC)) +
   ##annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
     #       fill = "lightgreen", color = "lightgreen",alpha = .7) +
-   annotate("rect", xmin = 15, xmax = 21, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
+   annotate("rect", xmin = 200, xmax = 350, ymin = -Inf, ymax = Inf, fill = "#E6F2E6", color = "#E6F2E6",alpha = .7) +
   geom_hline(yintercept = 0, linetype=2) +
-  geom_vline(xintercept = 15, linetype=2) +
-  geom_vline(xintercept = 21, linetype=2) +
+  geom_vline(xintercept = 200, linetype=2) +
+  geom_vline(xintercept = 350, linetype=2) +
   geom_smooth(size = 3, colour = "#2166AC") +
   labs(x="Precipitation (mm)",
        y="") +
@@ -1220,7 +1224,7 @@ library(patchwork)
 tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
 
 
-ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
+ggsave("fig/RR1.png", dpi = 600, width = 12, height = 6)
 ```
 
 ### Lag movel
@@ -1846,7 +1850,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`Later` = 0:40, `Earlier` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:85)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -3867,7 +3871,7 @@ LAG_BAND_B <- 41:LAG_MAX
 df_var_grid <- c(3, 4, 5)
 df_lag_grid <- c(3, 4, 5)
 
-VARS_ALL <- c("tmax", "rain", "vpd","rh","tmean","t2mdew","tmin")
+VARS_ALL <- c("tmax", "rain", "vpd","rh","tmean","t2mdew","tmin","rain_cum")
 
 # ---------------------------------------------------
 # FUNÇÕES AUXILIARES
@@ -3994,8 +3998,12 @@ results_df <- bind_rows(results) |>
 top5_models <- results_df |> slice(1:20)
 
   top5_models$CCC
+  
   results_df$CCC1 = results_df$CCC$est
-  writexl::write_xlsx(results_df,"data/results_df.xlsx")
+  results_df$rho1 = results_df$rho$est
+  
+  
+  writexl::write_xlsx(results_df,"data/results_df2.xlsx")
   
   results_df %>% 
     ggplot(aes(Cb))+
@@ -4003,6 +4011,31 @@ top5_models <- results_df |> slice(1:20)
   
   results_df %>% 
     filter(CCC >=0.80)
+
+  library(stringr)  
+  
+results_df |>
+  filter(str_detect(vars, "\\brain_cum\\b")) |>
+  mutate(
+    n_vars = str_count(vars, "\\+") + 1
+  ) |>
+  filter(n_vars <= 4)
+
+
+results_df %>% 
+  filter(model_id == 1647) %>% 
+  summarize(
+    CCC = CCC1
+  )
+
+
+results_df %>% 
+  filter(CCC1 >= 0.8) %>% 
+  filter(str_detect(vars, "\\brain_cum\\b")) |>
+  mutate(
+    n_vars = str_count(vars, "\\+") + 1
+  ) |>
+  filter(n_vars <= 4)
 ```
 
 
