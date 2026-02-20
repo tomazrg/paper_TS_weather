@@ -12,22 +12,17 @@ This chunk prepares the computational environment and defines the global structu
 
 ```{r}
 
-# ---- Chunk 0: packages & options -------------------------------------------
-suppressPackageStartupMessages({
+
   library(dplyr)
   library(tidyr)
   library(readr)
+  library(readxl)
   library(dlnm)
   library(brms)
   library(ggplot2)
   library(posterior)
   library(purrr)
-})
 
-# Opcional: usar cmdstanr se disponível (mais rápido/estável que rstan)
-if (requireNamespace("cmdstanr", quietly = TRUE)) {
-  options(brms.backend = "cmdstanr")
-}
 
 set.seed(20251218)
 
@@ -38,90 +33,17 @@ DF_VAR    <- 4      # flexibilidade na dimensão de exposição (ns)
 DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
 SEPARATOR <- LAG_MAX
 
-VARS <- c("tmax","rain_cum","vpd")   #, "vpd","rain"    # você pode adicionar "rain" se desejar
-
-#VARS <- c("tmax" , "rh" , "tmean" , "rain_cum")
-#VARS <- c("rain") 
-#VARS <- c("rain_sum","vpd", "temperature_2m_mean")
+VARS <- c("tmax","rain_cum","vpd")
 
 LAG_BAND_A <- 0:40
 LAG_BAND_B <- 41:LAG_MAX
-
-NDRAWS   <- 600
-AT_PROBS <- c(0.50, 0.75)
-
-CHAINS <- 4
-ITER   <- 4000
-CORES  <- 4
 ```
 
 ## Data importation and pre organization
 
 To ensure valid inference using a Distributed Lag Non‑Linear Model (DLNM), epidemiological observations and weather time series were first aligned in time and space and filtered to guarantee complete exposure histories. Disease severity was evaluated at a fixed assessment time (END_DAP), corresponding approximately to the R6 growth stage, and each epidemic was linked to its assumed assessment date. Daily weather data were then restricted to the period from planting (day 0) to the assessment day, ensuring that all lagged exposures used in the DLNM were fully observed. Only epidemics with complete daily weather records across the entire lag window were retained, as DLNM estimation requires a continuous exposure history for all lags considered. Vapor pressure deficit (VPD) was derived from mean temperature and relative humidity to represent atmospheric drying demand and leaf wetness persistence, which are epidemiologically more meaningful drivers of foliar disease development than relative humidity alone. A site–year identifier was constructed to capture unobserved spatial and temporal heterogeneity in subsequent mixed‑effects modeling. Finally, because disease severity was modeled using a beta regression, observations equal to 0 or 1 were slightly adjusted to satisfy the distributional assumptions of the beta likelihood. This preprocessing step establishes a consistent epidemiological time origin, guarantees complete lagged exposure information, and produces physically interpretable climatic covariates, thereby providing a sound foundation for constructing DLNM cross‑basis functions and estimating their effects within a generalized mixed modeling framework.
 
-```{r}
-
-# ---- Chunk 1: read & prepare ------------------------------------------------
-epi  <- read_csv("data/targetspot_epidemics_clean.csv", show_col_types = FALSE)
-wx   <- read_csv("data/targetspot_weather_long_0_90dap.csv", show_col_types = FALSE)
-ends <- read_csv("data/targetspot_assessment_endpoints_80_85_90dap.csv", show_col_types = FALSE)
-
-wx %>%
- count(epi_id, dpp) %>%
-  filter(n > 1)
-
-
-wx <- wx %>%
-  distinct(epi_id, dpp, .keep_all = TRUE)
-
-stopifnot(END_DAP %in% unique(ends$end_dap))
-
-end_use <- ends |>
-  dplyr::filter(end_dap == END_DAP) |>
-  dplyr::select(epi_id, assessment_date_assumed)
-
-epi_use <- epi |>
-  inner_join(end_use, by = "epi_id") |>
-  filter(!is.na(sev)) |>
-  mutate(siteyear = ifelse(is.na(siteyear) | siteyear == "",
-                           paste0(location, "_", year), siteyear))
-
-# Mantém apenas 0..END_DAP
-wx_use <- wx |>
-  filter(dpp >= 0, dpp <= END_DAP) |>
-  semi_join(epi_use, by = "epi_id") |>
-  arrange(epi_id, dpp)
-
-
-
-# Saturação de vapor e VPD (kPa)
-es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
-wx_use <- wx_use |>
-  mutate(vpd = es(tmean) * (1 - rh / 100))
-
-# Completude (todos os dias 0..END_DAP)
-comp <- wx_use |>
-  group_by(epi_id) |>
-  summarise(n_days = n_distinct(dpp), .groups = "drop") |>
-  mutate(ok = n_days == (END_DAP + 1))
-
-message("Epidemias completas: ", sum(comp$ok), "/", nrow(comp))
-
-epi_use <- epi_use |> semi_join(filter(comp, ok), by = "epi_id")
-wx_use  <- wx_use  |> semi_join(filter(comp, ok), by = "epi_id")
-
-# (Segurança Beta): se houver 0 ou 1 exatos, aplicar ligeiro encurtamento
-if (any(epi_use$sev <= 0 | epi_use$sev >= 1)) {
-  n <- nrow(epi_use)
-  epi_use <- epi_use |>
-    mutate(sev = (sev*(n - 1) + 0.5) / n)
-}
-
-```
-
-
-
-
+## ERA5 weather extraction
 ```{r}
 
 epi <- readxl::read_xlsx("data/ts_check.xlsx")
@@ -149,6 +71,10 @@ epi_use <- epi |>
     siteyear = paste0(location, "_", year)
   )
 
+epi_use
+```
+
+```{r, echo=TRUE, eval=FALSE}
 wx = get_era5(
   data = epi_use,
   days_around = "85",
@@ -179,7 +105,6 @@ wx_use <- wx_use |>
 #wx_use = wx_use %>% 
   #filter(dpp >=15)
 
-library(dplyr)
 
 wx_use <- wx_use |>
   arrange(epi_id, planting_date) |>
@@ -187,9 +112,12 @@ wx_use <- wx_use |>
   mutate(rain_cum = cumsum(rain)) |>
   ungroup()
 
-writexl::write_xlsx(wx_use,"data/ERA5_weather.xlsx")
+#writexl::write_xlsx(wx_use,"data/ERA5_weather.xlsx")
 ```
 
+```{r}
+wx_use = read_xlsx("data/ERA5_weather.xlsx")
+```
 
 ## Templates to cross-basis (shared)
 
@@ -309,8 +237,8 @@ $$
 \mathbf{X}_i
 =
 \left[
-\mathbf{X}_i^{(\text{rain})},
-\mathbf{X}_i^{(\text{tmean})},
+\mathbf{X}_i^{(\text{rain_cum})},
+\mathbf{X}_i^{(\text{tmax})},
 \mathbf{X}_i^{(\text{vpd})}
 \right].
 $$
@@ -588,6 +516,7 @@ CCC  <- 0.89
 Bias <- 0.94
 Precision <- 0.94
 
+library(scales)
 lab <- paste0(
   "CCC = ", number(CCC, accuracy = 0.01, decimal.mark = "."),
   "\nBias = ", number(Bias, accuracy = 0.01, decimal.mark = "."),
@@ -1235,89 +1164,19 @@ ggsave("fig/RR1.png", dpi = 600, width = 12, height = 6)
 library(dlnm)
 library(dplyr)
 library(ggplot2)
-
-var <- "tmean"
-cb  <- cb_templates[[var]]
-
-# extrair betas e vcov apenas da chuva
-cf  <- coef(summary(fit_tmb))$cond[,1]
-vc  <- vcov(fit_tmb)$cond
-idx <- grepl(paste0("cb_", var, "_"), names(cf))
-
-beta   <- cf[idx]
-vc_sub <- vc[idx, idx]
-
-# referência
-x_all <- wx_use[[var]]
-P50   <- quantile(x_all, 0.50, na.rm = TRUE)
-
-# grid usado para crosspred
-grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
-
-cp <- crosspred(
-  cb,
-  coef = beta,
-  vcov = vc_sub,
-  at   = grid,
-  cen  = P50,
-  bylag = 1
-)
-
-# matriz lag × efeito
-mf <- cp$matfit   # rows = valores de chuva; cols = lags
-
-# Extrair índice do valor mais próximo de 15 mm
-rain_val <- 28
-ix15 <- which.min(abs(grid - rain_val))
-
-# efeito em cada lag para chuva = 15 mm
-eta_lag <- mf[ix15, ]
-
-# razão de odds relativa por lag
-RR_lag <- exp(eta_lag)
-
-df_lag <- data.frame(
-  lag = 0:(length(RR_lag)-1),
-  RR_lag = RR_lag,
-  PERC = (RR_lag-1)*100
-)
-
-#max(df_lag$RR_lag)
-
-df_lag %>% 
-  ggplot() +
-  geom_smooth(aes(x = lag, y = PERC),
-            color = "steelblue", alpha = 0.5, size = 2) +
-  geom_hline(yintercept = 1, linetype = 2) +
-  #geom_point(color = "blue") +
-  labs(
-    x = "Lag (days)",
-    y = "Relative risk (%)") +
-  theme_bw()+
-  theme(
-    
-    text = element_text(face = "bold", size = 14)
-  )
-
-```
-
-```{r}
-library(dlnm)
-library(dplyr)
-library(ggplot2)
 library(tidyr)
 
 # ==============================================================
 # 1) EXTRAIR COEFICIENTES
 # ==============================================================
 
-var <- "tmean"
+var <- "tmax"
 cb  <- cb_templates[[var]]
 
 cf  <- coef(summary(fit_tmb))$cond[,1]
 vc  <- vcov(fit_tmb)$cond
 
-idx     <- grepl("^cb_tmean_", names(cf))
+idx     <- grepl("^cb_tmax_", names(cf))
 beta    <- cf[idx]
 vc_sub  <- vc[idx, idx]
 
@@ -1338,7 +1197,7 @@ grid <- sort(unique(as.numeric(quantile(
 
 # valores desejados para o heatmap (26 a 30 °C)
 #at_vals <- seq(1, 2, length.out = 10000)
-at_vals <- seq(25, 30, length.out = 10000)
+at_vals <- seq(29, 34, length.out = 10000)
 
 # ajustar ao range REAL do grid (evita extrapolação)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
@@ -1438,7 +1297,7 @@ tmean_movel
 cb_cols <- names(dat)[grepl("^cb_(tmax|vpd|rain_cum)_", names(dat))]
 fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
 
-dat$sev  = dat$sev/100
+#dat$sev  = dat$sev/100
 
 fit_sel <- glmmTMB::glmmTMB(
   fml_sel, data = dat,
@@ -1476,7 +1335,7 @@ P50      <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
 # Faixa para o heatmap (26–30 °C) aparada ao grid real (evita extrapolação)
 grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by=0.01), na.rm=TRUE))))
-at_vals  <- seq(28, 32, length.out = 1000)
+at_vals  <- seq(29, 34, length.out = 1000)
 at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
 
 # ------------ 2) Extrair coeficientes/VCOV do bloco DLNM de tmean -------------
@@ -1520,7 +1379,7 @@ mf  <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
 # Limitar à faixa de interesse (0–70 dias)
-lag_max_plot <- min(70, max(lag_idx))
+lag_max_plot <- min(85, max(lag_idx))
 keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf           <- mf[, keep_cols, drop = FALSE]
 lag_idx      <- lag_idx[keep_cols]
@@ -1566,7 +1425,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`Later` = 0:40, `Earlier` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:85)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -1615,7 +1474,7 @@ cb  <- cb_templates[[var]]
 cf  <- coef(summary(fit_tmb))$cond[,1]
 vc  <- vcov(fit_tmb)$cond
 
-idx     <- grepl("^cb_rain_", names(cf))
+idx     <- grepl("^cb_rain_cum_", names(cf))
 beta    <- cf[idx]
 vc_sub  <- vc[idx, idx]
 
@@ -1636,7 +1495,7 @@ grid <- sort(unique(as.numeric(quantile(
 
 # valores desejados para o heatmap (26 a 30 °C)
 #at_vals <- seq(1, 2, length.out = 10000)
-at_vals <- seq(5, 20, length.out = 10000)
+at_vals <- seq(0, 600, length.out = 10000)
 
 # ajustar ao range REAL do grid (evita extrapolação)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
@@ -1698,8 +1557,7 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
   # raster interpolado fica mais liso na tela
   geom_raster(interpolate = TRUE) +
   # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
-  geom_contour(aes(z = PERC), color = "black", size = 0.25,
-               breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
+  geom_contour(aes(z = PERC), color = "black", size = 0.25) +
   # rótulo só na isolinha zero (neutro) para guiar leitura
   geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
                     label.padding = unit(0.15, "lines"), size = 3.2) +
@@ -1804,7 +1662,7 @@ mf  <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
 # Limitar à faixa de interesse (0–70 dias)
-lag_max_plot <- min(70, max(lag_idx))
+lag_max_plot <- min(85, max(lag_idx))
 keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf           <- mf[, keep_cols, drop = FALSE]
 lag_idx      <- lag_idx[keep_cols]
@@ -1918,7 +1776,7 @@ grid <- sort(unique(as.numeric(quantile(
 
 # valores desejados para o heatmap (26 a 30 °C)
 #at_vals <- seq(1, 2, length.out = 10000)
-at_vals <- seq(0.66, 2, length.out = 10000)
+at_vals <- seq(0.66, 1.5, length.out = 10000)
 
 # ajustar ao range REAL do grid (evita extrapolação)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
@@ -2084,7 +1942,7 @@ mf  <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
 # Limitar à faixa de interesse (0–70 dias)
-lag_max_plot <- min(70, max(lag_idx))
+lag_max_plot <- min(85, max(lag_idx))
 keep_cols    <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf           <- mf[, keep_cols, drop = FALSE]
 lag_idx      <- lag_idx[keep_cols]
@@ -2130,7 +1988,7 @@ make_band_curve <- function(mf_row_by_lag, lag_idx, band) {
   sum(mf_row_by_lag[cols], na.rm = TRUE)
 }
 
-bands <- list(`Later` = 0:40, `Earlier` = 41:70)
+bands <- list(`Later` = 0:40, `Earlier` = 41:85)
 eta_band <- lapply(bands, function(bd) {
   apply(mf, 1, make_band_curve, lag_idx = lag_idx, band = bd)
 })
@@ -2162,1366 +2020,9 @@ sev_vpd
 ```{r}
 tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
 
-ggsave("fig/RR_movel_severity.png", dpi = 600, width = 10, height = 6)
+ggsave("fig/RR_movel_severity2.png", dpi = 600, width = 10, height = 6)
 
 #ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
-```
-
-```{r}
-df_plot2 = df_plot %>% 
-  mutate(
-    phase = case_when(lag >= 0 & lag <=40 ~ "Second",
-                      lag >= 41 & lag <=70 ~ "First"),
-    level = case_when(tmean_val >= 1.5 ~ "High",
-                      tmean_val < 1.5 ~ "Low")
-  ) %>% 
-  group_by(phase,level) %>% 
-  summarise(
-    mean = mean(PERC),
-    low = quantile(PERC,0.025),
-    high = quantile(PERC,0.975)
-    
-  )
-
-
-df_plot2 %>% 
-  ggplot(aes(mean))+
-  geom_histogram()+
-  facet_wrap(~phase+level)
-```
-
-### Effect across the years
-
-```{r}
-library(dplyr)
-library(purrr)
-library(dlnm)
-
-# ------------------ utilitário: pegar vetor garantindo existência -------------
-safe_pull <- function(data, varname) {
-  if (!(varname %in% names(data))) {
-    stop(
-      "A coluna '", varname, "' não existe no objeto fornecido.\n",
-      "Colunas disponíveis: ", paste(names(data), collapse = ", ")
-    )
-  }
-  data[[varname]]
-}
-
-# ------------------ função principal ------------------------------------------
-rr_by_year <- function(var = c("tmean","rain","vpd"),
-                       cb,                  # crossbasis dessa var (o mesmo do ajuste)
-                       fit,                 # seu glmmTMB ajustado (com (1|siteyear))
-                       wx_use,              # tabela com clima diário e uma coluna 'year'
-                       dat,                 # sua base com 'year' (para pegar a interseção)
-                       probs = seq(0.05, 0.95, by = 0.01),
-                       lags_vertical = 41:70,
-                       lags_horizontal = 0:40) {
-
-  var <- match.arg(var)
-
-  ## 1) pegar coeficientes e VCOV só dessa variável (seguindo seu padrão)
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-  prefix <- paste0("^cb_", var, "_")
-  idx <- grepl(prefix, names(cf))
-  if (!any(idx)) stop("Não encontrei coeficientes com prefixo ", prefix, " no modelo.")
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx, drop = FALSE]
-
-  ## 2) garantir coluna 'year' em wx_use
-  if (!("year" %in% names(wx_use))) {
-    if ("date" %in% names(wx_use)) {
-      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
-    } else {
-      stop("wx_use não tem coluna 'year' nem 'date'. Informe como identificar o ano.")
-    }
-  }
-
-  ## 3) checar existência da variável climática em wx_use
-  if (!(var %in% names(wx_use))) {
-    stop("A variável '", var, "' não existe em wx_use. Colunas: ",
-         paste(names(wx_use), collapse = ", "))
-  }
-
-  ## 4) interseção de anos entre as bases
-  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
-  if (length(years) == 0) stop("Sem interseção de anos entre dat$year e wx_use$year.")
-
-  ## 5) loop por ano com salvaguardas
-  out <- map_df(years, function(yr) {
-    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
-    x_yr <- x_yr[is.finite(x_yr)]
-    if (length(x_yr) == 0) {
-      warning("Ano ", yr, ": sem valores válidos para '", var, "'. Pulando.")
-      return(tibble(year = yr, at = numeric(0), RR_vertical = numeric(0), RR_horizontal = numeric(0)))
-    }
-
-    # grid seguro (se der NA/valor único, ainda assim terá ao menos 1 ponto)
-    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
-    grid <- grid[is.finite(grid)]
-    if (length(grid) == 0) grid <- median(x_yr, na.rm = TRUE)
-
-    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
-
-    # crosspred com MESMOS coeficientes do modelo global
-    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-
-    mf <- cp$matfit
-    lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
-    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf) - 1)
-
-    cols_v <- which(lag_idx %in% lags_vertical)
-    cols_h <- which(lag_idx %in% lags_horizontal)
-
-    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop = FALSE]) else rep(NA_real_, length(grid))
-    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop = FALSE]) else rep(NA_real_, length(grid))
-
-    tibble(
-      year = yr,
-      at = grid,
-      RR_vertical = exp(eta_v),
-      RR_horizontal = exp(eta_h)
-    )
-  })
-
-  out
-}
-
-
-# Para temperatura
-res_t <- rr_by_year(var = "tmean", cb = cb_templates[["tmean"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-# Para chuva
-res_r <- rr_by_year(var = "rain", cb = cb_templates[["rain"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-# Para VPD
-res_v <- rr_by_year(var = "vpd", cb = cb_templates[["vpd"]], fit = fit_tmb,
-                    wx_use = wx_use, dat = dat)
-
-
-res_t %>% 
-  #filter(at >=0.66) %>% 
-  #filter(at >=5) %>%
-  filter(at >= 25) %>%
-  ggplot(aes(at,RR_vertical))+
-  geom_smooth()+
-  facet_wrap(~year, scale = "free_y")+
-  theme_bw()
-
-
-
-
-curves_by_year_tmean <- rr_by_year(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-
-# curves_by_year: lista que você montou (por var) com $grid, $RR_vertical, $RR_horizontal
-summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
-  phase <- match.arg(phase)
-  purrr::imap_dfr(curves_by_year, function(x, yr){
-    g <- x$grid
-    rr <- if (phase=="vertical") x$RR_vertical else x$RR_horizontal
-    # área (trapézios) e estatísticas
-    AUC <- sum(diff(g) * zoo::rollmean(rr - 1, 2))
-    tibble::tibble(
-      year = as.integer(yr),
-      RR_mean = mean(rr, na.rm=TRUE),
-      RR_max  = max(rr, na.rm=TRUE),
-      at_max  = g[which.max(rr)],
-      AUC_excess = AUC
-    )
-  })
-}
-
-# Exemplo (temperatura):
-library(zoo)
-sum_t_vert <- summarize_year(curves_by_year_tmean, phase="vertical")
-sum_t_horz <- summarize_year(curves_by_year_tmean, phase="horizontal")
-sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
-sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
-sum_vpd_vert <- summarize_year(curves_by_year_vpd, phase="vertical")
-sum_vpd_horz <- summarize_year(curves_by_year_vpd, phase="horizontal")
-
-
-curves_by_year_tmean <- rr_by_year("tmean", cb_templates[["tmean"]], fit_tmb, wx_use, dat)
-curves_by_year_rain <- rr_by_year("rain", cb_templates[["rain"]], fit_tmb, wx_use, dat)
-curves_by_year_vpd  <- rr_by_year("vpd",  cb_templates[["vpd"]],  fit_tmb, wx_use, dat)
-```
-
-```{r}
-library(dplyr)
-library(purrr)
-library(dlnm)
-
-rr_by_year_list <- function(var = c("tmean","rain","vpd"),
-                            cb, fit, wx_use, dat,
-                            probs = seq(0.05, 0.95, by = 0.01),
-                            lags_vertical = 41:70,
-                            lags_horizontal = 0:40) {
-  var <- match.arg(var)
-
-  # --- coeficientes fixos dessa variável
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-  idx <- grepl(paste0("^cb_", var, "_"), names(cf))
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx, drop = FALSE]
-
-  # garantir coluna year em wx_use
-  if (!("year" %in% names(wx_use))) {
-    if ("date" %in% names(wx_use)) {
-      wx_use <- mutate(wx_use, year = as.integer(format(as.Date(date), "%Y")))
-    } else stop("wx_use precisa ter 'year' ou 'date'.")
-  }
-  if (!(var %in% names(wx_use))) {
-    stop("A variável '", var, "' não existe em wx_use. Tem: ",
-         paste(names(wx_use), collapse = ", "))
-  }
-
-  years <- sort(intersect(unique(dat$year), unique(wx_use$year)))
-  if (!length(years)) stop("Sem interseção de anos entre dat$year e wx_use$year.")
-
-  # ---- LOOP que devolve LISTA
-  out_list <- setNames(vector("list", length(years)), years)
-
-  for (i in seq_along(years)) {
-    yr <- years[i]
-    x_yr <- wx_use %>% filter(year == yr) %>% pull(all_of(var))
-    x_yr <- x_yr[is.finite(x_yr)]
-    if (!length(x_yr)) {
-      warning("Ano ", yr, " sem valores válidos para ", var, ".")
-      out_list[[i]] <- list(grid = numeric(0),
-                            RR_vertical = numeric(0),
-                            RR_horizontal = numeric(0))
-      next
-    }
-
-    grid <- unique(as.numeric(quantile(x_yr, probs, na.rm = TRUE)))
-    grid <- grid[is.finite(grid)]
-    if (!length(grid)) grid <- median(x_yr, na.rm = TRUE)
-
-    P50 <- stats::quantile(x_yr, 0.50, na.rm = TRUE)
-
-    cp <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-
-    mf <- cp$matfit
-    lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-    if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-
-    cols_v <- which(lag_idx %in% lags_vertical)
-    cols_h <- which(lag_idx %in% lags_horizontal)
-
-    eta_v <- if (length(cols_v)) rowSums(mf[, cols_v, drop=FALSE]) else rep(NA_real_, length(grid))
-    eta_h <- if (length(cols_h)) rowSums(mf[, cols_h, drop=FALSE]) else rep(NA_real_, length(grid))
-
-    out_list[[i]] <- list(
-      grid = grid,
-      RR_vertical = exp(eta_v),
-      RR_horizontal = exp(eta_h)
-    )
-  }
-
-  out_list
-}
-
-
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
-  d <- purrr::imap_dfr(curves_by_year, function(x, yr){
-    tibble::tibble(
-      year = as.integer(yr),
-      at = x$grid,
-      RR  = if(phase=="vertical") x$RR_vertical else x$RR_horizontal
-    )
-  })
-  d = d %>% 
-    filter(at >=25)
-  
-  ggplot(d, aes(at, RR, group=year, color=factor(year))) +
-    geom_line(alpha=.6, linewidth=0.9) +
-    scale_color_viridis_d(end=.9, option="C") +
-    geom_hline(yintercept=1, linetype=2, color="grey40") +
-    labs(x = var_label, y = "RR (relativo ao P50 do ano)", color = "Ano") +
-    theme_minimal(base_size = 12)
-}
-
-plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="vertical")
-
-```
-
-```{r}
-impact_p90_p10 <- function(curves_by_year){
-  purrr::imap_dfr(curves_by_year, function(x, yr){
-    q10 <- quantile(x$grid, .50, na.rm=TRUE)
-    q90 <- quantile(x$grid, .90, na.rm=TRUE)
-    # aproxima RR por pontos mais próximos do grid
-    idx10 <- which.min(abs(x$grid - q10))
-    idx90 <- which.min(abs(x$grid - q90))
-    tibble::tibble(
-      year = as.integer(yr),
-      RRv_delta = x$RR_vertical[idx90],
-      RRh_delta = x$RR_horizontal[idx90] ,
-      delta_RR = RRh_delta - RRv_delta,
-      RR_v_perc = (RRv_delta-1)*100,
-      RR_h_perc = (RRh_delta-1)*100
-    )
-  })
-}
-
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_rain <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_vpd <- rr_by_year_list(
-  var = "vpd",
-  cb = cb_templates[["vpd"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-tmean_p90_10 = impact_p90_p10(curves_by_year_tmean)
-rain_p90_10 = impact_p90_p10(curves_by_year_rain)
-vpd_p90_10 = impact_p90_p10(curves_by_year_vpd)
-
-
-######### TMEAN
-
-tmean_long <- tmean_p90_10 %>%
-  pivot_longer(
-    cols = c(RRh_delta, RRv_delta),
-    names_to = "phase",
-    values_to = "RR_delta"
-  ) %>%
-  mutate(
-    phase = recode(phase,
-                   RRh_delta = "Later",
-                   RRv_delta = "Earlier")
-  )
-
-
-
-df <- tmean_long %>%
-  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
-
-tmean_year_plot = df %>%  
-  ggplot(aes(x = as.factor(year), y = RR_delta)) +
-  # linha horizontal de referência
-  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
-
-  # Earlier (nudge left) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = -0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Earlier"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = -0.15)
-  ) +
-
-  # Later (nudge right) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = 0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Later"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = 0.15)
-  ) +
-
-  # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
-
-  # linetype por phase
-  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
-
-  labs(x = "", y = expression(RR[delta])) +
-
-  theme_bw() +
-  theme(legend.position = "none",
-        axis.text.x = element_blank())+
-  coord_flip()
-
-
-######### RAIN
-
-rain_long <- rain_p90_10 %>%
-  pivot_longer(
-    cols = c(RRh_delta, RRv_delta),
-    names_to = "phase",
-    values_to = "RR_delta"
-  ) %>%
-  mutate(
-    phase = recode(phase,
-                   RRh_delta = "Later",
-                   RRv_delta = "Earlier")
-  )
-
-
-
-df <- rain_long %>%
-  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
-
-rain_year_plot = df %>% 
-ggplot(aes(x = as.factor(year), y = RR_delta)) +
-  # linha horizontal de referência
-  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
-
-  # Earlier (nudge left) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = -0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Earlier"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = -0.15)
-  ) +
-
-  # Later (nudge right) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = 0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Later"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = 0.15)
-  ) +
-
-  # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
-
-  # linetype por phase
-  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
-
-  labs(x = "", y = expression(RR[delta]),
-       linetype = "Phase") +
-
-  theme_bw() +
-  theme(legend.position = "right",
-        axis.text.x = element_blank())+
-  coord_flip()
-
-
-
-######### VPD
-
-vpd_long <- vpd_p90_10 %>%
-  pivot_longer(
-    cols = c(RRh_delta, RRv_delta),
-    names_to = "phase",
-    values_to = "RR_delta"
-  ) %>%
-  mutate(
-    phase = recode(phase,
-                   RRh_delta = "Later",
-                   RRv_delta = "Earlier")
-  )
-
-
-
-df <- vpd_long %>%
-  mutate(Effect = ifelse(RR_delta >= 1, "Positive", "Negative"))
-
-vpd_year_plot = df %>% 
-ggplot(aes(x = as.factor(year), y = RR_delta)) +
-  # linha horizontal de referência
-  geom_hline(yintercept = 1, linetype = "dashed", color = "grey40") +
-
-  # Earlier (nudge left) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Earlier"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = -0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Earlier"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = -0.15)
-  ) +
-
-  # Later (nudge right) — segmento com linetype
-  geom_segment(
-    data = df %>% filter(phase == "Later"),
-    aes(xend = as.factor(year), yend = 1, color = Effect, linetype = phase),
-    linewidth = 0.8,
-    position = position_nudge(x = 0.15)
-  ) +
-  geom_point(
-    data = df %>% filter(phase == "Later"),
-    aes(color = Effect),
-    size = 2.5,
-    position = position_nudge(x = 0.15)
-  ) +
-
-  # cores (acima/abaixo de 1)
-  scale_color_manual(values = c("Positive" = "red", "Negative" = "darkgreen")) +
-
-  # linetype por phase
-  scale_linetype_manual(values = c("Earlier" = "solid", "Later" = "dashed")) +
-
-  labs(x = "Year", y = expression(RR[delta])) +
-
-  theme_bw() +
-  theme(legend.position = "none")+
-  coord_flip()
-
-
-
-(tmean_year_plot/rain_year_plot/vpd_year_plot)
-
-ggsave("fig/marginal_year.png", dpi = 600, bg = "white", height = 8, width = 6)
-```
-
-```{r}
-# severidade média por ano (ajuste o nome da coluna de resposta)
-sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
-
-# junte com sumários climáticos (ex.: temperatura vertical)
-df_join <- left_join(sum_r_vert, sev_year, by="year")
-
-# correlação simples
-cor(df_join$AUC_excess, df_join$sev_mean, use="complete.obs")
-
-
-df_join %>% 
-  ggplot(aes(AUC_excess))+
-  geom_histogram()
-
-df_join %>% 
-  #filter(!AUC_excess<0) %>% 
-  ggplot(aes(AUC_excess,sev_mean))+
-  geom_point()
-
-```
-
-```{r}
-
-curves_by_year_tmean <- rr_by_year_list(
-  var = "tmean",
-  cb = cb_templates[["tmean"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_rain <- rr_by_year_list(
-  var = "rain",
-  cb = cb_templates[["rain"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-curves_by_year_vpd <- rr_by_year_list(
-  var = "vpd",
-  cb = cb_templates[["vpd"]],
-  fit = fit_tmb,
-  wx_use = wx_use,
-  dat = dat
-)
-
-features <- reduce(
-  list(
-    summarize_year(curves_by_year_tmean,"vertical") %>% dplyr::select(year, T_vert=AUC_excess),
-    summarize_year(curves_by_year_tmean,"horizontal") %>% dplyr::select(year, T_horz=AUC_excess),
-    summarize_year(curves_by_year_rain,"vertical") %>% dplyr::select(year, R_vert=AUC_excess),
-    summarize_year(curves_by_year_rain,"horizontal") %>% dplyr::select(year, R_horz=AUC_excess),
-    summarize_year(curves_by_year_vpd,"vertical") %>% dplyr::select(year, V_vert=AUC_excess),
-    summarize_year(curves_by_year_vpd,"horizontal") %>% dplyr::select(year, V_horz=AUC_excess)
-  ), ~ left_join(.x, .y, by="year")
-) %>% 
-  column_to_rownames("year")
-
-km <- kmeans(scale(features), centers = 3, nstart = 50)
-
-
-library(pheatmap)
-library(dplyr)
-
-# z-score por coluna para comparabilidade
-Z <- scale(features)
-
-# vetor de clusters
-cl <- factor(km$cluster)
-
-```
-
-
-### Severidade
-
-```{r}
-# monte a fórmula com os blocos presentes
-cb_cols <- names(dat)[grepl("^cb_(tmean|vpd|rain)_", names(dat))]
-fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
-
-fit_sel <- glmmTMB::glmmTMB(
-  fml_sel, data = dat,
-  family = glmmTMB::beta_family(link = "logit")
-)
-summary(fit_sel)
-
-library(DHARMa)
-res <- simulateResiduals(fit_sel, n = 1000)
-plot(res)
-
-
-
-
-
-
-
-
-
-get_or_band <- function(fit, var, cb_template, band = 0:40) {
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-
-  pref <- paste0("^cb_", var, "_")
-  beta <- cf[grep(pref, names(cf))]
-  V    <- vc [grep(pref, rownames(vc)), grep(pref, colnames(vc))]
-
-  x_all <- wx_use[[var]]
-  P50 <- as.numeric(quantile(x_all, 0.50, na.rm=TRUE))
-  P75 <- as.numeric(quantile(x_all, 0.75, na.rm=TRUE))
-
-  cp <- dlnm::crosspred(cb_template, coef = beta, vcov = V,
-                        at = c(P50, P75), cen = P50, bylag = 1)
-
-  mf <- cp$matfit
-  lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-
-  cols <- which(lag_idx %in% band)
-  eta  <- sum(mf[2, cols], na.rm = TRUE)
-  OR   <- exp(eta)
-  c(eta = eta, OR = OR, P50 = P50, P75 = P75)
-}
-
-or_rain_A <- get_or_band(fit_sel, "rain",  cb_templates[["rain"]],  band = 0:40)
-or_tmean_A<- get_or_band(fit_sel, "tmean", cb_templates[["tmean"]], band = 0:40)
-or_vpd_A  <- get_or_band(fit_sel, "vpd",   cb_templates[["vpd"]],   band = 0:40)
-
-or_rain_B <- get_or_band(fit_sel, "rain",  cb_templates[["rain"]],  band = 41:LAG_MAX)
-or_tmean_B<- get_or_band(fit_sel, "tmean", cb_templates[["tmean"]], band = 41:LAG_MAX)
-or_vpd_B  <- get_or_band(fit_sel, "vpd",   cb_templates[["vpd"]],   band = 41:LAG_MAX)
-
-
-
-sev_base <- mean(predict(fit_sel, type = "response"))
-
-to_pp <- function(OR, sev0 = sev_base) {
-  sev1 <- plogis(qlogis(sev0) + log(OR))
-  c(sev0 = sev0, sev1 = sev1, delta_pp = 100*(sev1 - sev0))
-}
-
-pp_rain_A  <- to_pp(or_rain_A["OR"])
-pp_tmean_A <- to_pp(or_tmean_A["OR"])
-pp_vpd_A   <- to_pp(or_vpd_A["OR"])
-
-pp_rain_B  <- to_pp(or_rain_B["OR"])
-pp_tmean_B <- to_pp(or_tmean_B["OR"])
-pp_vpd_B   <- to_pp(or_vpd_B["OR"])
-
-
-
-
-
-plot_or_curve <- function(fit, var, cb_template, band = 0:40) {
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-  pref <- paste0("^cb_", var, "_")
-  beta <- cf[grep(pref, names(cf))]
-  V    <- vc [grep(pref, rownames(vc)), grep(pref, colnames(vc))]
-  x_all <- wx_use[[var]]
-  grid  <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01), na.rm=TRUE))))
-  P50   <- as.numeric(quantile(x_all, 0.50, na.rm=TRUE))
-
-  cp <- dlnm::crosspred(cb_template, coef = beta, vcov = V,
-                        at = grid, cen = P50, bylag = 1)
-  mf <- cp$matfit
-  lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-  cols <- which(lag_idx %in% band)
-  eta  <- apply(mf[, cols, drop = FALSE], 1, sum)
-  dplyr::tibble(x = grid, OR = exp(eta))
-}
-
-or_curve_t <- plot_or_curve(fit_sel, "tmean", cb_templates[["tmean"]], band = 0:40)
-ggplot(or_curve_t, aes(x, OR)) +
-  geom_hline(yintercept = 1, linetype = 2) +
-  geom_line(linewidth = 1) +
-  labs(x = "Temperatura média (°C)", y = "OR (P75 vs P50, acumulado 0–40)",
-       title = "Curva OR condicional — Temperatura") +
-  theme_bw()
-```
-
-```{r}
-# Pacotes
-library(dlnm)
-library(glmmTMB)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(scales)
-
-# ================== ENTRADAS ==================
-# fit_sel: seu glmmTMB com cb_(tmean|vpd|rain)
-# cb_templates[["rain"]]
-# wx_use[["rain"]]
-# LAG_MAX coerente com o cb (>= 70)
-
-# 1) Extrair bloco de RAIN e parâmetros
-var   <- "rain"
-cb    <- cb_templates[[var]]
-x_all <- wx_use[[var]]
-P50   <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
-P75   <- as.numeric(quantile(x_all, 0.75, na.rm = TRUE))
-
-cf <- coef(summary(fit_sel))$cond[, 1]
-vc <- vcov(fit_sel)$cond
-pref <- paste0("^cb_", var, "_")
-beta <- cf[grep(pref, names(cf))]
-V    <- vc[grep(pref, rownames(vc)), grep(pref, colnames(vc)), drop = FALSE]
-
-stopifnot(length(beta) == ncol(cb), nrow(V) == ncol(cb))
-
-# Grade de chuva (limita ao observado para evitar extrapolação)
-grid_obs  <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
-rain_vals <- seq(5, 20, length.out = 500)
-rain_vals <- rain_vals[rain_vals >= min(grid_obs) & rain_vals <= max(grid_obs)]
-
-# 2) crosspred com centragem em P50
-cp <- crosspred(cb, coef = beta, vcov = V, at = rain_vals, cen = P50, bylag = 1)
-mf <- cp$matfit  # [|rain_vals| x |lags|] na escala do preditor linear
-
-lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
-if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-ord <- order(lag_idx); mf <- mf[, ord, drop = FALSE]; lag_idx <- lag_idx[ord]
-
-LAG_MAX <- if (exists("LAG_MAX")) LAG_MAX else max(lag_idx)
-keep    <- lag_idx <= LAG_MAX
-mf      <- mf[, keep, drop = FALSE]
-lag_idx <- lag_idx[keep]
-
-# 3) Baseline igual ao do seu manual
-sev_base <- mean(predict(fit_sel, type = "response"))
-logit <- qlogis; ilogit <- plogis
-sev_base_pct <- 100 * sev_base
-
-# 4) Cumulativo por BANDA: 41→L (zera lags < 41 antes do cumsum)
-L0 <- 41L
-mf_band <- mf
-mf_band[, lag_idx < L0] <- 0
-eta_cum_41L <- t(apply(mf_band, 1, cumsum))  # [|rain_vals| x |lags|]
-
-# 5) Converter para ΔSeveridade (pp) em relação ao baseline
-DELTA_pp_41L <- 100 * ilogit(logit(sev_base) + eta_cum_41L) - sev_base_pct
-
-# 6) Data frame "long" para heatmap
-df <- as.data.frame(DELTA_pp_41L)
-colnames(df) <- paste0("lag_", lag_idx)
-df <- df |>
-  mutate(rain = rain_vals) |>
-  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "DELTA_pp") |>
-  mutate(lag = as.integer(gsub("lag_", "", lag)))
-
-# 7) Heatmap ΔSeveridade (pp) — banda 41→L
-lims <- quantile(df$DELTA_pp, c(0.02, 0.98), na.rm = TRUE)
-max_abs <- max(abs(lims))
-p_band <- ggplot(df, aes(x = lag, y = rain, fill = DELTA_pp)) +
-  geom_raster(interpolate = TRUE) +
-  scale_fill_gradient2(low = "#2c7bb6", mid = "white", high = "#d7191c",
-                       midpoint = 0, limits = c(-max_abs, max_abs),
-                       name = expression(Delta*" severidade (pp)")) +
-  labs(x = "Lag (dias antes da avaliação)", y = "Precipitação (mm)",
-       title = expression(Delta*"Severidade (pp) — acumulado apenas de 41" %->% "L")) +
-  theme_bw(base_size = 12) +
-  theme(panel.grid = element_blank(),
-        axis.title = element_text(face = "bold"))
-p_band
-
-# 8) Checagem de equivalência com o seu manual (P75 vs P50, banda 41→L)
-cp_chk <- crosspred(cb, coef = beta, vcov = V, at = c(P50, P75), cen = P50, bylag = 1)
-mf_chk <- cp_chk$matfit   # 2 x |lags| ; linha 2 = efeito em P75
-lags   <- suppressWarnings(as.integer(gsub("lag","", colnames(mf_chk))))
-if (anyNA(lags)) lags <- 0:(ncol(mf_chk)-1)
-
-eta_band_manual <- sum(mf_chk[2, lags >= L0 & lags <= LAG_MAX], na.rm = TRUE)
-sev1_pp_manual  <- 100 * ilogit(logit(sev_base) + eta_band_manual)
-delta_pp_manual <- sev1_pp_manual - sev_base_pct
-
-# Ponto equivalente na superfície: rain ≈ P75 e L = LAG_MAX
-ix_rain <- which.min(abs(rain_vals - P75))
-ix_L    <- which.max(which(lag_idx <= LAG_MAX))
-delta_pp_surface <- DELTA_pp_41L[ix_rain, ix_L]
-
-cat(sprintf("\nChecagem (banda 41→L) em rain=P75:\nManual : %.6f pp\nSurface: %.6f pp\nDiff   : %.6f pp\n",
-            delta_pp_manual, delta_pp_surface, delta_pp_surface - delta_pp_manual))
-```
-
-### Simulacao
-
-```{r}
-library(MASS)
-library(dplyr)
-library(ggplot2)
-
-# --------------------------
-# 1) Simular coeficientes
-# --------------------------
-set.seed(123)
-nsim <- 1000   # número de simulações
-
-beta_sim <- mvrnorm(n = nsim, mu = beta, Sigma = vc_sub)
-
-# --------------------------
-# 2) Função para calcular RR acumulado
-# --------------------------
-compute_rr <- function(beta_vec){
-  cp_sim <- crosspred(
-    cb,
-    coef = beta_vec,
-    vcov = vc_sub,   # pode manter vc_sub
-    at   = grid,
-    cen  = P50,
-    bylag = 1
-  )
-
-  mf_sim <- cp_sim$matfit
-  etaA_sim <- apply(mf_sim[, colsA, drop=FALSE], 1, sum)
-  exp(etaA_sim)
-}
-
-# --------------------------
-# 3) Calcular RR para cada simulação
-# --------------------------
-RR_sim_list <- lapply(1:nsim, function(i) {
-  compute_rr(beta_sim[i, ])
-})
-
-# Transformar em tibble longo
-df_sim <- do.call(cbind, RR_sim_list) %>%
-  as.data.frame() %>%
-  mutate(tmean = grid) %>%
-  tidyr::pivot_longer(
-    cols = starts_with("V"),
-    names_to = "sim",
-    values_to = "RR"
-  )
-
-# --------------------------
-# 4) Dataframe com curva média
-# --------------------------
-df_mean <- data.frame(
-  tmean = grid,
-  RR_med = RR
-) %>% 
-  filter(tmean >= 0.66)
-
-df_sim2 = df_sim %>% 
-  group_by(tmean) %>% 
-  summarise(
-    RR1 = mean(RR),
-    lo = quantile(RR, 0.025, na.rm=TRUE),
-    hi = quantile(RR, 0.975, na.rm=TRUE)) %>% 
-  mutate(
-    RR1 = (RR1-1)*100,
-    lo = (lo-1)*100,
-    hi = (hi-1)*100
-  )
-
-df_sim %>% 
-  filter(tmean >= 0.66) %>%
-  filter(RR <75) %>% 
-ggplot() +
-  geom_smooth(aes(x = tmean, y = RR),
-            color = "black", alpha = 0.5, size = 2) +
- # geom_smooth(data = df_mean, aes(x = tmean, y = RR_med),
-  #         color = "red", size = 1.2) +
-  geom_hline(yintercept = 1, linetype=2) +
-  labs(x = "Precipitação (mm)",
-       y = "Razão de odds relativa (P75 vs P50, lags 60–70)",
-       title = "Efeito cumulativo de precipitação (com incerteza paramétrica)") +
-  theme_bw()
-
-gc()
-```
-
-```{r}
-extract_rr_from_fit <- function(fit, var, grid, P50, colsA) {
-
-  cf <- coef(summary(fit))$cond[,1]
-  vc <- vcov(fit)$cond
-
-  idx <- grepl(paste0("^cb_", var, "_"), names(cf))
-
-  beta <- cf[idx]
-  vc_sub <- vc[idx, idx]
-
-  cp <- crosspred(
-    cb_templates[[var]],
-    coef = beta,
-    vcov = vc_sub,
-    at   = grid,
-    cen  = P50,
-    bylag = 1
-  )
-
-  mf <- cp$matfit
-  eta <- rowSums(mf[, colsA, drop=FALSE])
-
-  return(eta)  # retorna log-RR (η)
-}
-
-
-library(glmmTMB)
-
-set.seed(123)
-B <- 300   # 200–500 já costuma ser suficiente
-
-eta_boot <- vector("list", B)
-
-for (b in 1:B) {
-
-  # 1) simular nova resposta do modelo ajustado
-  dat_boot <- dat
-  dat_boot$sev <- simulate(fit_tmb, nsim = 1)[[1]]
-
-  # 2) reajustar o modelo
-  fit_boot <- try(
-    glmmTMB(formula = formula(fit_tmb),
-            data = dat_boot,
-            family = beta_family(link="logit")),
-    silent = TRUE
-  )
-
-  if (inherits(fit_boot, "try-error")) next
-
-  # 3) extrair η (log-RR) para a variável de interesse
-  eta_boot[[b]] <- extract_rr_from_fit(
-    fit_boot,
-    var  = "tmean",
-    grid = grid,
-    P50  = P50,
-    colsA = colsA
-  )
-}
-
-# combinar
-eta_mat <- do.call(cbind, eta_boot)
-
-
-df_ci <- data.frame(
-  tmean = grid,
-  eta_lo = apply(eta_mat, 1, quantile, 0.025, na.rm=TRUE),
-  eta_med= apply(eta_mat, 1, quantile, 0.50,  na.rm=TRUE),
-  eta_hi = apply(eta_mat, 1, quantile, 0.975, na.rm=TRUE)
-) %>%
-  mutate(
-    RR_med = exp(eta_med),
-    RR_lo  = exp(eta_lo),
-    RR_hi  = exp(eta_hi),
-    PERC_med = (RR_med - 1) * 100,
-    PERC_lo  = (RR_lo  - 1) * 100,
-    PERC_hi  = (RR_hi  - 1) * 100
-  )
-```
-
-```{r}
-library(dlnm)
-library(MASS)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-
-# =========================================================
-# CONFIGURAÇÕES (ajuste aqui)
-# =========================================================
-var        <- "vpd"         # "rain", "tmean", "vpd"
-lag_window <- 41:70          # ex: 0:40 ou 41:70 ou 60:70
-nsim       <- 1000            # 300-800 costuma bastar (1000 raramente necessário)
-grid_probs <- seq(0.05, 0.95, by = 0.01)   # domínio com suporte (P10–P90)
-k_trunc    <- 2.5            # truncamento por k*SE (2.0 a 3.0)
-eta_cap    <- 6              # rejeita simulações com |eta| > eta_cap (6 => RR~403)
-set.seed(123)
-
-# =========================================================
-# 0) OBJETOS NECESSÁRIOS: cb, beta, vc_sub, x_all, grid, P50, colsA
-# (segue seu padrão de extração)
-# =========================================================
-cb <- cb_templates[[var]]
-
-cf <- coef(summary(fit_tmb))$cond[,1]
-vc <- vcov(fit_tmb)$cond
-idx <- grepl(paste0("^cb_", var, "_"), names(cf))
-beta   <- cf[idx]
-vc_sub <- vc[idx, idx, drop = FALSE]
-
-# checagem de consistência (evita erro "coef/vcov not consistent")
-stopifnot(length(beta) == ncol(cb))
-stopifnot(nrow(vc_sub) == ncol(cb))
-
-# grid restrito ao suporte empírico
-x_all <- wx_use[[var]]
-grid  <- sort(unique(as.numeric(quantile(x_all, probs = grid_probs, na.rm = TRUE))))
-
-# referência (P50) usada como centragem
-P50 <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
-
-# crosspred base só para descobrir colunas de lag
-cp0 <- crosspred(cb, coef = beta, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-mf0 <- cp0$matfit
-lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf0))))
-if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf0)-1)
-
-colsA <- which(lag_idx %in% lag_window)
-stopifnot(length(colsA) > 0)
-
-# =========================================================
-# 1) IC "analítico" como baseline (sem simulação) — opcional
-# crosspred já devolve ICs por lag via matlow/mathigh [1](https://cran.r-project.org/web/packages/dlnm/dlnm.pdf)[2](https://ericrscott.com/posts/2021-01-13-dlnm-getting-started/)
-# =========================================================
-eta_hat <- rowSums(mf0[, colsA, drop=FALSE])   # log-RR acumulado (vs cen)
-RR_hat  <- exp(eta_hat)
-
-df_hat <- tibble(
-  x = grid,
-  eta = eta_hat,
-  RR  = RR_hat,
-  PERC = (RR_hat - 1) * 100
-)
-
-# =========================================================
-# 2) SIMULAÇÃO MVN COM TRUNCAMENTO POR k*SE
-# =========================================================
-sd_beta <- sqrt(diag(vc_sub))
-low_vec  <- as.numeric(beta - k_trunc * sd_beta)
-high_vec <- as.numeric(beta + k_trunc * sd_beta)
-
-beta_sim <- MASS::mvrnorm(n = nsim, mu = beta, Sigma = vc_sub)
-
-# truncamento por coluna (mantém nsim x p)
-LOW  <- matrix(rep(low_vec,  each = nsim), nrow = nsim)
-HIGH <- matrix(rep(high_vec, each = nsim), nrow = nsim)
-beta_sim <- pmin(pmax(beta_sim, LOW), HIGH)
-
-# =========================================================
-# 3) Função para obter ETA (log-RR) acumulado por grid
-# =========================================================
-compute_eta <- function(beta_vec){
-  cp_sim <- crosspred(cb, coef = beta_vec, vcov = vc_sub, at = grid, cen = P50, bylag = 1)
-  mf_sim <- cp_sim$matfit
-  rowSums(mf_sim[, colsA, drop=FALSE])
-}
-
-# =========================================================
-# 4) Rodar simulações + rejeitar draws patológicos por |eta|
-# =========================================================
-eta_list <- vector("list", nsim)
-keep <- logical(nsim)
-
-for(i in 1:nsim){
-  et <- compute_eta(beta_sim[i, ])
-  if(all(is.finite(et)) && max(abs(et), na.rm = TRUE) <= eta_cap){
-    keep[i] <- TRUE
-    eta_list[[i]] <- et
-  }
-}
-
-message("Simulações aceitas: ", sum(keep), " / ", nsim)
-
-eta_mat <- do.call(cbind, eta_list[keep])
-stopifnot(!is.null(eta_mat))
-
-# =========================================================
-# 5) Resumo dos ICs NO ETA e depois converter para RR e %
-# =========================================================
-df_ci <- tibble(
-  x = grid,
-  eta_lo  = apply(eta_mat, 1, quantile, 0.025, na.rm = TRUE),
-  eta_med = apply(eta_mat, 1, quantile, 0.50,  na.rm = TRUE),
-  eta_hi  = apply(eta_mat, 1, quantile, 0.975, na.rm = TRUE)
-) %>%
-  mutate(
-    RR_lo  = exp(eta_lo),
-    RR_med = exp(eta_med),
-    RR_hi  = exp(eta_hi),
-    PERC_lo  = (RR_lo  - 1) * 100,
-    PERC_med = (RR_med - 1) * 100,
-    PERC_hi  = (RR_hi  - 1) * 100
-  ) %>% 
-  filter(x >=0.66)
-
-# =========================================================
-# 6) Plot recomendado: mediana + IC (sem geom_smooth)
-# =========================================================
-lab_x <- switch(var,
-                "rain"  = "Precipitation (mm)",
-                "tmean" = "Temperature (°C)",
-                "vpd"   = "VPD (kPa)",
-                "Exposure")
-
-df_ci %>% 
-ggplot(aes(x = x)) +
-  geom_hline(yintercept = 0, linetype = 2) +
-  geom_line(aes(y = RR_med), color = "black", linewidth = 1.2) +
-  geom_line(aes(y = RR_lo),  color = "grey40", linetype = "dashed") +
-  geom_line(aes(y = RR_hi),  color = "grey40", linetype = "dashed") +
-  labs(
-    x = lab_x,
-    y = "Relative risk (% change)",
-    title = paste0("DLNM cumulative effect with stabilized uncertainty (lags ",
-                   min(lag_window), "–", max(lag_window), ")"),
-    subtitle = paste0("Grid: P", min(grid_probs)*100, "–P", max(grid_probs)*100,
-                      "; MVN truncation: ±", k_trunc, "SE; eta cap: ", eta_cap)
-  ) +
-  theme_bw()
-```
-
-
-### OR para as 2 fases
-
-```{r}
-# --------- FUNÇÃO PARA CALCULAR EFEITO CUMULADO EM BANDAS -------------------
-
-get_dlnm_cumulative_glmmtmb <- function(var,
-                                        cb_template,
-                                        fit_tmb,
-                                        lagA = 0:40,
-                                        lagB = 41:70,
-                                        at_probs = c(0.50, 0.975)) {
-  
-  # 1) Intervalo de exposição (P50 vs P75, igual ao brms)
-  x_all <- wx_use[[var]]
-  at_vals <- as.numeric(quantile(x_all, probs = at_probs, na.rm = TRUE))
-  names(at_vals) <- c("typ","hi")
-  
-  # 2) Extrair coeficientes correspondentes ao var
-  prefix <- paste0("cb_", var, "_")
-  cf     <- coef(summary(fit_tmb))$cond[,1]    # betas
-  vc     <- vcov(fit_tmb)$cond                 # VCV
-  
-  idx    <- grepl(prefix, names(cf))
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx]
-  
-  # 3) crosspred
-  cp <- crosspred(
-    cb_template,
-    coef = beta,
-    vcov = vc_sub,
-    at   = at_vals,
-    cen  = at_vals[1],   # P50 é referência
-    bylag = 1
-  )
-  
-  mf <- cp$matfit   # matriz [n_at x n_lags], efeito por lag
-  
-  # Extrair índice dos lags
-  lag_names <- colnames(mf)
-  lag_idx   <- suppressWarnings(as.integer(gsub("lag","", lag_names)))
-  if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
-  
-  # 4) Localizar as linhas: 1=P50, 2=P75
-  r_hi <- 2
-  
-  # 5) Somar lag por bandas
-  colsA <- which(lag_idx %in% lagA)
-  colsB <- which(lag_idx %in% lagB)
-  
-  dA <- sum(mf[r_hi, colsA], na.rm=TRUE)
-  dB <- sum(mf[r_hi, colsB], na.rm=TRUE)
-  
-  data.frame(
-    var = var,
-    lagA_min = min(lagA), lagA_max = max(lagA),
-    lagB_min = min(lagB), lagB_max = max(lagB),
-    at_typ = at_vals[1],
-    at_hi  = at_vals[2],
-    delta_eta_A = dA,
-    delta_eta_B = dB,
-    OR_A = exp(dA),
-    OR_B = exp(dB)
-  )
-}
-
-# ---------------------- APLICAR À TEMPERATURA OU VPD ------------------------
-
-cum_tmean <- get_dlnm_cumulative_glmmtmb("tmean", cb_templates[["tmean"]],
-                                         fit_tmb, lagA=0:40, lagB=41:70)
-
-cum_vpd   <- get_dlnm_cumulative_glmmtmb("vpd", cb_templates[["vpd"]],
-                                         fit_tmb, lagA=0:40, lagB=41:70)
-
-cum_rain   <- get_dlnm_cumulative_glmmtmb("rain", cb_templates[["rain"]],
-                                         fit_tmb, lagA=0:40, lagB=41:70)
-
-
-
-# Para temperatura média
-quantile(wx_use$tmean, probs = c(0.50, 0.975), na.rm = TRUE)
-
-# Para VPD
-quantile(wx_use$vpd, probs = c(0.50, 0.75), na.rm = TRUE)
-
-# Para chuva
-quantile(wx_use$rain, probs = c(0.50, 0.75), na.rm = TRUE)
-
-```
-
-```{r}
-get_dlnm_cumulative_glmmtmb_window_quantiles <- function(var,
-                                                         cb_template,
-                                                         fit_tmb,
-                                                         lagA = 0:40,
-                                                         lagB = 41:70,
-                                                         probs = c(0.50, 0.75),
-                                                         end_dap = END_DAP) {
-
-  # ------------------------------------------------------------
-  # 1) Construir variável lag = end_dap - dpp e pegar x por janela
-  # ------------------------------------------------------------
-  wx_tmp <- wx_use %>%
-    mutate(lag = end_dap - dpp) %>%
-    filter(!is.na(.data[[var]]))
-
-  xA <- wx_tmp %>% filter(lag %in% lagA) %>% pull(.data[[var]])
-  xB <- wx_tmp %>% filter(lag %in% lagB) %>% pull(.data[[var]])
-
-  # quantis por janela
-  qA <- as.numeric(quantile(xA, probs = probs, na.rm = TRUE))
-  qB <- as.numeric(quantile(xB, probs = probs, na.rm = TRUE))
-
-  ref_A <- qA[1]; hi_A <- qA[2]   # P50 e P75 da janela A
-  ref_B <- qB[1]; hi_B <- qB[2]   # P50 e P75 da janela B
-
-  # ------------------------------------------------------------
-  # 2) Extrair betas e vcov do var no modelo glmmTMB
-  # ------------------------------------------------------------
-  prefix <- paste0("^cb_", var, "_")
-  cf     <- coef(summary(fit_tmb))$cond[,1]
-  vc     <- vcov(fit_tmb)$cond
-
-  idx    <- grepl(prefix, names(cf))
-  beta   <- cf[idx]
-  vc_sub <- vc[idx, idx, drop = FALSE]
-
-  # ------------------------------------------------------------
-  # 3) crosspred separado por janela (para usar cen diferente)
-  # ------------------------------------------------------------
-
-  # Janela A: referência = P50_A, contraste = P75_A
-  cpA <- crosspred(
-    cb_template,
-    coef = beta,
-    vcov = vc_sub,
-    at   = c(ref_A, hi_A),
-    cen  = ref_A,
-    bylag = 1
-  )
-  mfA <- cpA$matfit
-
-  lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mfA))))
-  if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mfA)-1)
-
-  colsA <- which(lag_idx %in% lagA)
-  dA <- sum(mfA[2, colsA], na.rm = TRUE)
-
-  # Janela B: referência = P50_B, contraste = P75_B
-  cpB <- crosspred(
-    cb_template,
-    coef = beta,
-    vcov = vc_sub,
-    at   = c(ref_B, hi_B),
-    cen  = ref_B,
-    bylag = 1
-  )
-  mfB <- cpB$matfit
-
-  colsB <- which(lag_idx %in% lagB)
-  dB <- sum(mfB[2, colsB], na.rm = TRUE)
-
-  # ------------------------------------------------------------
-  # 4) Retorno
-  # ------------------------------------------------------------
-  data.frame(
-    var = var,
-    lagA_min = min(lagA), lagA_max = max(lagA),
-    lagB_min = min(lagB), lagB_max = max(lagB),
-
-    ref_P50_later = ref_A,
-    hi_P75_later  = hi_A,
-    ref_P50_earlier = ref_B,
-    hi_P75_earlier  = hi_B,
-
-    delta_eta_later = dA,
-    delta_eta_earlier = dB,
-    OR_later = exp(dA),
-    OR_earlier = exp(dB),
-    PERC_later = (exp(dA) - 1) * 100,
-    PERC_earlier = (exp(dB) - 1) * 100
-  )
-}
-
-
-cum_tmean <- get_dlnm_cumulative_glmmtmb_window_quantiles(
-  "tmean", cb_templates[["tmean"]], fit_tmb, lagA = 0:40, lagB = 41:70
-)
-
-cum_rain <- get_dlnm_cumulative_glmmtmb_window_quantiles(
-  "rain", cb_templates[["rain"]], fit_tmb, lagA = 0:40, lagB = 41:70
-)
-
-cum_vpd <- get_dlnm_cumulative_glmmtmb_window_quantiles(
-  "vpd", cb_templates[["vpd"]], fit_tmb, lagA = 0:40, lagB = 41:70
-)
 ```
 
 
@@ -3665,7 +2166,7 @@ tmean_plot+rain_plot+vpd_plot
 
 ```{r}
 lat_plot = epi %>% 
-  ggplot(aes(lat))+
+  ggplot(aes(latitude))+
   geom_histogram(colour = "white", fill = "#002f61", bins = 12)+
    labs(
     x = "Latitude",
@@ -3678,7 +2179,7 @@ lat_plot = epi %>%
 
 
 lon_plot = epi %>% 
-  ggplot(aes(lon))+
+  ggplot(aes(longitude))+
   geom_histogram(colour = "white", fill = "#002f61", bins = 12)+
    labs(
     x = "Longitude",
@@ -3731,7 +2232,7 @@ ggplot(aes(days_difference)) +
 ggsave("fig/covariates.png", dpi = 600, bg = "white", height = 6, width = 10)
 ```
 
-```{r}
+```{r, echo=TRUE, eval=FALSE}
 library(dplyr)
 library(lubridate)
 
@@ -3850,8 +2351,8 @@ writexl::write_xlsx(wx_win,"data/wx_win.xlsx")
 
 
 ```
-
-```{r}
+# Model simulation
+```{r, echo=TRUE, eval=FALSE}
 library(dplyr)
 library(purrr)
 library(tidyr)
