@@ -27,7 +27,7 @@ Target spot is a foliar disease caused by *Corynespora cassiicola*, a necrotroph
 
 <div style="text-align: justify;">
 
-Under controlled conditions, the epidemiological parameters of *Corynespora cassiicola*—such as lesion size and number, spore length, germination, and sporulation rates—are affected by fluctuations in in temperature and humidity. However, despite its growing relevance, there is still limited understanding of how environmental factors in different epidemiological phases of the target spot can influence the epidemics under natural field conditions.
+Under controlled conditions, the epidemiological parameters of *Corynespora cassiicola*—such as lesion size and number, spore length, germination, and sporulation rates—are affected by fluctuations in temperature and humidity. However, despite its growing relevance, there is still limited understanding of how environmental factors in different epidemiological phases of the target spot can influence the epidemics under natural field conditions.
 
 </div>
 

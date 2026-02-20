@@ -3,7 +3,7 @@ project:
   output-dir: docs
 
 website:
-  title: "Lagged modeling"
+  title: "Distributed Lag Non-linear modeling"
   navbar:
     left:
       - href: index.qmd

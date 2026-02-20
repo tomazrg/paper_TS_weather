@@ -4,8 +4,6 @@ message: false
 warning: false
 ---
 
-# Dlnm approach
-
 ## Packages, options and parameters
 
 This chunk prepares the computational environment and defines the global structural parameters that govern the Distributed Lag Non‑Linear Model (DLNM) and the subsequent inferential model. It does not yet fit a statistical model; instead, it establishes the methodological framework under which the DLNM is constructed and later estimated within a generalized (mixed) model.
@@ -355,7 +353,7 @@ where $f_v(\cdot,\cdot)$ denotes the exposure–lag response surface defined by 
 ```{r}
 
 
-# ---- Chunk 4: fit brms beta hierarchical model ------------------------------
+# ---- Chunk 4: fit linear mixed model ------------------------------
 cb_terms <- paste(names(dat)[grepl("^cb_", names(dat))], collapse = " + ")
 fml <- as.formula(paste0("sev ~ 1 + (1|siteyear) + ", cb_terms))
 
@@ -363,7 +361,7 @@ library(glmmTMB)
 dat$sev  = dat$sev/100
   
   
-fit_tmb <- glmmTMB( #fit_tmb
+fit_tmb <- glmmTMB( 
   formula = fml,
   data = dat,
   family = beta_family(link = "logit")
