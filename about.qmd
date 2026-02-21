@@ -2537,5 +2537,357 @@ results_df %>%
   filter(n_vars <= 4)
 ```
 
+# Severity (weather movel)
+## All period
+```{r}
+# --------- 0) utilitários ----------
+get_cb_names <- function(dat, var){
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
 
+make_scenario_series <- function(wx_long, value, var){
+  # usa o comprimento típico (por epi) que você já tem em wx_use
+  n <- wx_long |> dplyr::filter(!is.na(.data[[var]])) |> dplyr::count(epi_id) |> dplyr::pull(n)
+  n_ref <- stats::median(n) |> as.integer()   # comprimento "típico"
+  rep(value, n_ref)
+}
+
+# Sua função já existente (mantida)
+extract_last_cb_row <- function(x, cb_template) {
+  cb <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cb[length(x), ])
+}
+
+# --------- 1) monta um newdata de 1 linha para o cenário conjunto ----------
+predict_scenario <- function(fit, dat, wx_long, cb_templates,
+                             tmax_val, rain_val, vpd_val,
+                             siteyear_level = NA,
+                             pop_level = TRUE) {
+
+  # séries do cenário (constante no tempo; você pode trocar por perfil/onda/pulso)
+  xt  <- make_scenario_series(wx_long, tmax_val, "tmax")
+  xr  <- make_scenario_series(wx_long, rain_val, "rain_cum")
+  xv  <- make_scenario_series(wx_long, vpd_val,  "vpd")
+
+  # extrai a "última linha" da crossbasis de cada variável (como você faz no ajuste)
+  bt <- extract_last_cb_row(xt, cb_templates[["tmax"]])
+  br <- extract_last_cb_row(xr, cb_templates[["rain_cum"]])
+  bv <- extract_last_cb_row(xv, cb_templates[["vpd"]])
+
+  # cria newdata com as colunas cb_* corretas
+  nd <- data.frame(siteyear = siteyear_level)
+
+  nm_t <- get_cb_names(dat, "tmax")
+  nm_r <- get_cb_names(dat, "rain_cum")
+  nm_v <- get_cb_names(dat, "vpd")
+
+  nd[nm_t] <- as.list(bt)
+  nd[nm_r] <- as.list(br)
+  nd[nm_v] <- as.list(bv)
+
+  # predição
+  if (pop_level) {
+    # predição populacional = RE zerados
+    # em glmmTMB, re.form=NA (ou ~0) zera RE (pop-level) [1](https://glmmtmb.github.io/glmmTMB/reference/predict.glmmTMB.html)
+    as.numeric(predict(fit, newdata = nd, type = "response", re.form = NA))
+  } else {
+    # predição condicional (com RE) – precisa de um level existente em siteyear
+    as.numeric(predict(fit, newdata = nd, type = "response"))
+  }
+}
+
+# --------- 2) exemplo: seu cenário ----------
+sev_cenario <- predict_scenario(
+  fit = fit_sel, dat = dat, wx_long = wx_use, cb_templates = cb_templates,
+  tmax_val = 32, rain_val = 300, vpd_val = 1.5,
+  pop_level = TRUE
+)
+
+sev_cenario * 100
+
+wx_use
+```
+
+
+
+```{r}
+get_cp_matfit <- function(var, at_vals, cen_val){
+  cb <- cb_templates[[var]]
+
+  cf <- coef(summary(fit_sel))$cond[, 1]
+  vc <- vcov(fit_sel)$cond
+
+  pref     <- paste0("^cb_", var, "_")
+  idx_beta <- grep(pref, names(cf))
+  beta     <- cf[idx_beta]
+
+  idx_rows <- grep(pref, rownames(vc))
+  idx_cols <- grep(pref, colnames(vc))
+  V        <- vc[idx_rows, idx_cols, drop = FALSE]
+
+  cp <- dlnm::crosspred(
+    cb, coef = beta, vcov = V,
+    at = at_vals, cen = cen_val, bylag = 1
+  )
+  cp$matfit  # matriz: length(at_vals) x (lags)
+}
+
+# 1) define cen (mediana) de cada variável
+P50_tmax <- as.numeric(quantile(wx_use$tmax, 0.50, na.rm=TRUE))
+P50_rain <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm=TRUE))
+P50_vpd  <- as.numeric(quantile(wx_use$vpd, 0.50, na.rm=TRUE))
+
+# 2) sua grade para tmax
+at_tmax <- seq(29, 29, length.out=200)
+
+mf_tmax <- get_cp_matfit("tmax",     at_tmax, P50_tmax)   # matriz
+mf_rain <- get_cp_matfit("rain_cum", 100,     P50_rain)   # 1 x lags
+mf_vpd  <- get_cp_matfit("vpd",      0.6,     P50_vpd)    # 1 x lags
+
+# 3) recicla mf_rain e mf_vpd para o tamanho de mf_tmax
+mf_total <- mf_tmax +
+  matrix(rep(mf_rain[1,], each = nrow(mf_tmax)), nrow = nrow(mf_tmax)) +
+  matrix(rep(mf_vpd[1, ], each = nrow(mf_tmax)), nrow = nrow(mf_tmax))
+
+sev_base <- mean(predict(fit_sel, type="response"))
+sev_base
+```
+
+```{r}
+sev_base <- predict_scenario(
+  fit = fit_sel, dat = dat, wx_long = wx_use, cb_templates = cb_templates,
+  tmax_val = P50_tmax, rain_val = P50_rain, vpd_val = P50_vpd,
+  pop_level = TRUE
+)
+sev_base
+```
+
+## Different phases
+```{r}
+# ============================================================
+# DLNM + glmmTMB(beta) — Simulação por 2 cenários em 2 janelas:
+#   - Janela A: lags 0–40  (mais recente)
+#   - Janela B: lags 41–85 (mais antiga)
+# Retorna severidade final prevista (%) para cenários conjuntos.
+# ============================================================
+
+library(dlnm)
+library(glmmTMB)
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# ------------------------------- PARÂMETROS ----------------------------------
+END_DAP   <- 85     # ponto final (ex.: 85 DAP)
+LAG_MAX   <- 85     # lag máximo
+DF_VAR    <- 4
+DF_LAG    <- 4
+SEPARATOR <- LAG_MAX
+
+VARS <- c("tmax","rain_cum","vpd")
+
+# janelas em termos de LAG (não em "dias do calendário")
+LAG_BAND_A <- 0:40
+LAG_BAND_B <- 41:LAG_MAX
+
+# -------------------- [1] CONSTRUÇÃO DAS CROSS-BASIS TEMPLATES ----------------
+# (Você já faz isso; mantive a mesma lógica)
+
+build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
+  ids <- unique(wx_long$epi_id)
+  out <- vector("list", length(ids))
+  for (i in seq_along(ids)) {
+    v <- wx_long |>
+      filter(epi_id == ids[i]) |>
+      arrange(dpp) |>
+      pull(.data[[var]])
+    out[[i]] <- c(v, rep(NA_real_, sep_n))
+  }
+  unlist(out)
+}
+
+cb_templates <- list()
+for (v in VARS) {
+  stopifnot(v %in% names(wx_use))
+  x_pool <- build_pooled_series(wx_use, v, sep_n = SEPARATOR)
+
+  cb_templates[[v]] <- dlnm::crossbasis(
+    x_pool,
+    lag    = LAG_MAX,
+    argvar = list(fun = "ns", df = DF_VAR),
+    arglag = list(fun = "ns", df = DF_LAG)
+  )
+}
+
+# -------------------- [2] DESIGN POR EPIDEMIA (1 linha por epi_id) ------------
+extract_last_cb_row <- function(x, cb_template) {
+  cb <- dlnm::crossbasis(
+    x,
+    lag    = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cb[length(x), ])
+}
+
+build_design_for_var <- function(wx_long, var, cb_template, prefix) {
+  X <- wx_long |>
+    group_by(epi_id) |>
+    summarise(cb = list(extract_last_cb_row(.data[[var]], cb_template)),
+              .groups = "drop")
+  p  <- length(X$cb[[1]])
+  nm <- paste0(prefix, seq_len(p))
+  X |> mutate(cb = lapply(cb, setNames, nm)) |> tidyr::unnest_wider(cb)
+}
+
+X_list <- map(VARS, ~ build_design_for_var(wx_use, .x, cb_templates[[.x]],
+                                           prefix = paste0("cb_", .x, "_")))
+names(X_list) <- VARS
+X <- reduce(X_list, left_join, by = "epi_id")
+
+dat <- epi_use |>
+  dplyr::select(epi_id, sev, siteyear, year, location, state, latitude, longitude, planting_date, PD85) |>
+  left_join(X, by = "epi_id")
+
+# resposta em (0,1): cuidado com 0 e 1 no beta
+dat$sev <- dat$sev/100
+eps <- 1e-4
+dat$sev <- pmin(pmax(dat$sev, eps), 1 - eps)
+
+# ---------------------------- [3] AJUSTE DO MODELO ----------------------------
+cb_cols <- names(dat)[grepl("^cb_(tmax|vpd|rain_cum)_", names(dat))]
+fml_sel <- as.formula(paste("sev ~ 1 + (1|siteyear) +", paste(cb_cols, collapse = " + ")))
+
+fit_sel <- glmmTMB(
+  fml_sel, data = dat,
+  family = glmmTMB::beta_family(link = "logit")
+)
+
+# summary(fit_sel)
+
+# =====================================================================
+# [4] FUNÇÕES PARA SIMULAÇÃO POR 2 CENÁRIOS EM 2 JANELAS DE LAG
+# =====================================================================
+
+# --- util: converte um conjunto de lags em índices da série x (comprimento N)
+# Se N = LAG_MAX+1, então:
+#   lag 0  -> índice N (último dia)
+#   lag 85 -> índice 1 (primeiro dia)
+lags_to_idx <- function(N, lags) {
+  idx <- N - lags
+  idx[idx >= 1 & idx <= N]
+}
+
+# --- cria uma série base (mediana) e aplica valores diferentes em janelas de lag
+make_profile_two_windows <- function(N, base_value,
+                                     lags_A, value_A,
+                                     lags_B, value_B) {
+  x <- rep(base_value, N)
+  x[lags_to_idx(N, lags_A)] <- value_A
+  x[lags_to_idx(N, lags_B)] <- value_B
+  x
+}
+
+# --- extrai os nomes das colunas cb_* do dat para uma variável
+get_cb_colnames <- function(dat, var) {
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
+
+# --- monta um newdata de 1 linha com as cb_* para TODAS as variáveis
+build_newdata_from_profiles <- function(dat, cb_templates, profiles,
+                                        siteyear_level = NA) {
+  nd <- data.frame(siteyear = siteyear_level)
+
+  for (v in names(profiles)) {
+    cb_row <- extract_last_cb_row(profiles[[v]], cb_templates[[v]])
+    cols   <- get_cb_colnames(dat, v)
+
+    stopifnot(length(cb_row) == length(cols))
+    nd[cols] <- as.list(cb_row)
+  }
+  nd
+}
+
+# --- prevê severidade final para cenários conjuntos (2 janelas)
+predict_two_window_scenario <- function(fit_sel, dat, cb_templates,
+                                        # valores base (geralmente mediana)
+                                        base_vals,
+                                        # janela A (lags 0–40) e janela B (41–85)
+                                        scenA_vals, scenB_vals,
+                                        lags_A = 0:40, lags_B = 41:85,
+                                        N = LAG_MAX + 1,
+                                        pop_level = TRUE,
+                                        siteyear_level = NA) {
+
+  # constrói perfis para cada variável
+  profiles <- list()
+  for (v in names(base_vals)) {
+    profiles[[v]] <- make_profile_two_windows(
+      N = N,
+      base_value = base_vals[[v]],
+      lags_A = lags_A, value_A = scenA_vals[[v]],
+      lags_B = lags_B, value_B = scenB_vals[[v]]
+    )
+  }
+
+  # monta newdata
+  nd <- build_newdata_from_profiles(dat, cb_templates, profiles,
+                                   siteyear_level = siteyear_level)
+
+  # predição
+  # re.form = NA -> previsão populacional (RE = 0) [3](https://glmmtmb.github.io/glmmTMB/reference/predict.glmmTMB.html)
+  if (pop_level) {
+    pred <- predict(fit_sel, newdata = nd, type = "response", re.form = NA)
+  } else {
+    pred <- predict(fit_sel, newdata = nd, type = "response")
+  }
+
+  as.numeric(pred)
+}
+
+# =====================================================================
+# [5] EXEMPLO PRONTO (COMO VOCÊ PEDIU)
+# =====================================================================
+
+# Baseline (medianas observadas)
+base_vals <- list(
+  tmax     = as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE)),
+  rain_cum = as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE)),
+  vpd      = as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
+)
+
+# Cenário A (later)
+scenA_vals <- list(
+  tmax     = 32,
+  rain_cum = 1000,
+  vpd      = 0.66
+)
+
+# Cenário B (Earlier) — EXEMPLO (troque pelos seus valores)
+scenB_vals <- list(
+  tmax     = 25,
+  rain_cum = 100,
+  vpd      = 0.2
+)
+
+sev_pred <- predict_two_window_scenario(
+  fit_sel = fit_sel,
+  dat = dat,
+  cb_templates = cb_templates,
+  base_vals = base_vals,
+  scenA_vals = scenA_vals,
+  scenB_vals = scenB_vals,
+  lags_A = LAG_BAND_A,
+  lags_B = LAG_BAND_B,
+  N = LAG_MAX + 1,
+  pop_level = TRUE # TRUE = populacional; FALSE = condicional (exige siteyear)
+)
+
+cat("Severidade prevista (%): ", 100 * sev_pred, "\n")
+
+```
 
