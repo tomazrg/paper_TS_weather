@@ -2937,7 +2937,7 @@ wx_use2 %>%
   summarise(
     mean = mean(sev)
   ) %>% 
-  filter(state.x == "BA")
+  filter(state.x == "TO")
 
 ```
 ```{r}
@@ -2948,6 +2948,14 @@ wx_use2 %>%
     min = min(sev),
     max = max(sev)
   )
+```
+```{r}
+wx_use2 %>% 
+  group_by(year.x) %>% 
+  summarise(
+    mean = mean(sev),
+    min = min(sev),
+    max = max(sev))
 ```
 
 
@@ -3023,7 +3031,7 @@ rain_state = wx_use2 %>%
     strip.text = element_text(size = 14, face = "bold")
   )+
   labs(x = "DPP",
-       y = "Accumulated rainfall (°C)",
+       y = "Accumulated rainfall (mm)",
        color = "")
 rain_state
 
