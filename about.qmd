@@ -2937,10 +2937,21 @@ wx_use2 %>%
   summarise(
     mean = mean(sev)
   ) %>% 
-  filter(state.x == "MG")
+  filter(state.x == "BA")
+
+```
+```{r}
+wx_use2 %>% 
+  group_by(state.x) %>% 
+  summarise(
+    mean = mean(sev),
+    min = min(sev),
+    max = max(sev)
+  )
+```
 
 
-
+```{r}
 wx_use2 %>% 
   group_by(year.x,state.x) %>% 
   summarise(
@@ -2949,7 +2960,6 @@ wx_use2 %>%
   ggplot(aes(as.factor(year.x),mean))+
   geom_bar(stat = "identity")+
   facet_wrap(~state.x)
-
 ```
 
 ```{r}
@@ -2960,10 +2970,17 @@ vpd_state = wx_use2 %>%
   theme_bw()+
   scale_color_viridis_d()+
   theme(
+    text = element_text(size = 14),
+    axis.title = element_text(face = "bold"),
     legend.position = "right",
     strip.background = element_blank(),
     strip.text = element_text(size = 14, face = "bold")
-  )
+  )+
+  labs(x = "DPP",
+       y = "VPD (kPa)",
+       color = "")
+
+vpd_state
 
 ggsave("fig/vpd_state.png", dpi = 600, width = 14, height = 10)
 ```
@@ -2976,10 +2993,15 @@ tmax_state = wx_use2 %>%
   theme_bw()+
   scale_color_viridis_d()+
   theme(
+    text = element_text(size = 14),
+    axis.title = element_text(face = "bold"),
     legend.position = "right",
     strip.background = element_blank(),
     strip.text = element_text(size = 14, face = "bold")
-  )
+  )+
+  labs(x = "DPP",
+       y = "Maximum temperature (°C)",
+       color = "")
 
 tmax_state
 
@@ -2993,11 +3015,16 @@ rain_state = wx_use2 %>%
   facet_wrap(~state.x, ncol = 3)+
   theme_bw()+
   scale_color_viridis_d()+
-  theme(
+    theme(
+    text = element_text(size = 14),
+    axis.title = element_text(face = "bold"),
     legend.position = "right",
     strip.background = element_blank(),
     strip.text = element_text(size = 14, face = "bold")
-  )
+  )+
+  labs(x = "DPP",
+       y = "Accumulated rainfall (°C)",
+       color = "")
 rain_state
 
 ggsave("fig/rain_state.png", dpi = 600, width = 14, height = 10)
