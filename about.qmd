@@ -73,6 +73,7 @@ epi_use
 ```
 
 ```{r, echo=TRUE, eval=FALSE}
+library(r4pde)
 wx = get_era5(
   data = epi_use,
   days_around = "85",
@@ -90,7 +91,7 @@ colnames(wx) = c("planting_date", "tmean","tmax","tmin","rh","rain","t2mdew","lo
 unique(wx$epi_id)
 
 wx_use <- epi_use |>
-  select(study,year,location,epi_id) %>% 
+  select(study,year,location,epi_id,state) %>% 
   left_join(wx, by = "epi_id")
 
 wx_use$dpp <- rep(0:85, times = 254)
@@ -2538,7 +2539,8 @@ results_df %>%
 ```
 
 # Severity (weather movel)
-## All period
+
+### All period
 ```{r}
 # --------- 0) utilitários ----------
 get_cb_names <- function(dat, var){
@@ -2603,13 +2605,45 @@ predict_scenario <- function(fit, dat, wx_long, cb_templates,
 # --------- 2) exemplo: seu cenário ----------
 sev_cenario <- predict_scenario(
   fit = fit_sel, dat = dat, wx_long = wx_use, cb_templates = cb_templates,
-  tmax_val = 32, rain_val = 300, vpd_val = 1.5,
+  tmax_val = 20, rain_val = 300, vpd_val = 0.66,
   pop_level = TRUE
 )
 
 sev_cenario * 100
 
-wx_use
+#max(wx_use$tmax)
+tmax = seq(20, 40,length.out = 100)
+rain = seq(5, 600,length.out = 100)
+vpd = c(0.66,1,1.5)
+
+combined_data<- expand.grid(tmax = tmax, rain = rain, vpd = vpd)
+
+
+combined_data$sev <- predict_scenario(
+  fit = fit_sel, dat = dat, wx_long = wx_use, cb_templates = cb_templates,
+  tmax_val = combined_data$tmax, rain_val = combined_data$rain, vpd_val = combined_data$vpd,
+  pop_level = TRUE
+)
+
+
+library(purrr)
+
+combined_data$sev <- apply(
+  combined_data[, c("tmax", "rain", "vpd")],
+  1,
+  function(x) {
+    predict_scenario(
+      fit = fit_sel,
+      dat = dat,
+      wx_long = wx_use,
+      cb_templates = cb_templates,
+      tmax_val = x[1],
+      rain_val = x[2],
+      vpd_val  = x[3],
+      pop_level = TRUE
+    )
+  }
+)
 ```
 
 
@@ -2666,7 +2700,7 @@ sev_base <- predict_scenario(
 sev_base
 ```
 
-## Different phases
+### Different phases
 ```{r}
 # ============================================================
 # DLNM + glmmTMB(beta) — Simulação por 2 cenários em 2 janelas:
@@ -2889,5 +2923,91 @@ sev_pred <- predict_two_window_scenario(
 
 cat("Severidade prevista (%): ", 100 * sev_pred, "\n")
 
+```
+
+```{r}
+
+wx_use2 = read_xlsx("data/ERA5_weather2.xlsx")
+
+wx_use2 = wx_use2 %>% 
+  left_join(epi_use, by = "epi_id")
+
+wx_use2 %>% 
+  group_by(year.x,state.x) %>% 
+  summarise(
+    mean = mean(sev)
+  ) %>% 
+  filter(state.x == "MG")
+
+
+
+wx_use2 %>% 
+  group_by(year.x,state.x) %>% 
+  summarise(
+    mean = mean(sev)
+  ) %>% 
+  ggplot(aes(as.factor(year.x),mean))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~state.x)
+
+```
+
+```{r}
+vpd_state = wx_use2 %>% 
+  ggplot(aes(dpp,vpd, group = as.factor(year.x), color = as.factor(year.x)))+
+  geom_smooth(se = F)+
+  facet_wrap(~state.x, ncol = 3)+
+  theme_bw()+
+  scale_color_viridis_d()+
+  theme(
+    legend.position = "right",
+    strip.background = element_blank(),
+    strip.text = element_text(size = 14, face = "bold")
+  )
+
+ggsave("fig/vpd_state.png", dpi = 600, width = 14, height = 10)
+```
+
+```{r}
+tmax_state = wx_use2 %>% 
+  ggplot(aes(dpp,tmax, group = as.factor(year.x), color = as.factor(year.x)))+
+  geom_smooth(se = F)+
+  facet_wrap(~state.x, ncol = 3)+
+  theme_bw()+
+  scale_color_viridis_d()+
+  theme(
+    legend.position = "right",
+    strip.background = element_blank(),
+    strip.text = element_text(size = 14, face = "bold")
+  )
+
+tmax_state
+
+ggsave("fig/tmax_state.png", dpi = 600, width = 14, height = 10)
+```
+
+```{r}
+rain_state = wx_use2 %>% 
+  ggplot(aes(dpp,rain_cum, group = as.factor(year.x), color = as.factor(year.x)))+
+  geom_smooth(se = F)+
+  facet_wrap(~state.x, ncol = 3)+
+  theme_bw()+
+  scale_color_viridis_d()+
+  theme(
+    legend.position = "right",
+    strip.background = element_blank(),
+    strip.text = element_text(size = 14, face = "bold")
+  )
+rain_state
+
+ggsave("fig/rain_state.png", dpi = 600, width = 14, height = 10)
+```
+
+
+```{r}
+library(patchwork)
+tmax_state+rain_state+vpd_state
+
+ggsave("fig/dpp_state.png", dpi = 600, width = 14, height = 10)
 ```
 
