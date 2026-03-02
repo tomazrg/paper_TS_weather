@@ -2453,6 +2453,60 @@ sum_r_vert <- summarize_year(curves_by_year_rain, phase="vertical")
 sum_r_horz <- summarize_year(curves_by_year_rain, phase="horizontal")
 sum_vpd_vert <- summarize_year(curves_by_year_vpd, phase="vertical")
 sum_vpd_horz <- summarize_year(curves_by_year_vpd, phase="horizontal")
+
+
+T_plot = features %>% 
+  ggplot()+
+  geom_smooth(aes(year,T_vert),se = F, color = "darkgreen", size = 2)+
+  geom_smooth(aes(year,T_horz),se = F, color = "brown", size = 2)+
+  scale_x_continuous(breaks=c(2012,2013,2014,2015,2016,2017,
+                              2018,2019,2020,2021,2022,2023,2024), limits = c(2012,2024))+
+ # scale_y_continuous(breaks=c(-100,0,100,200), limits = c(-100,200))+
+  theme_bw() +
+  labs(
+    x = "",
+    y = "Relative effect (%)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12),
+        axis.text.x = element_blank())
+
+R_plot = features %>% 
+  ggplot()+
+  geom_smooth(aes(year,R_vert),se = F, color = "darkgreen", size = 2)+
+  geom_smooth(aes(year,R_horz),se = F, color = "brown", size = 2)+
+  scale_x_continuous(breaks=c(2012,2013,2014,2015,2016,2017,
+                              2018,2019,2020,2021,2022,2023,2024), limits = c(2012,2024))+
+ # scale_y_continuous(breaks=c(-100,0,100,200), limits = c(-100,200))+
+  theme_bw() +
+  labs(
+    x = "",
+    y = "Relative effect (%)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12),
+        axis.text.x = element_blank())
+
+
+V_plot = features %>% 
+  ggplot()+
+  geom_smooth(aes(year,V_vert),se = F, color = "darkgreen", size = 2)+
+  geom_smooth(aes(year,V_horz),se = F, color = "brown", size = 2)+
+  scale_x_continuous(breaks=c(2012,2013,2014,2015,2016,2017,
+                              2018,2019,2020,2021,2022,2023,2024), limits = c(2012,2024))+
+ # scale_y_continuous(breaks=c(-100,0,100,200), limits = c(-100,200))+
+  theme_bw() +
+  labs(
+    x = "Year",
+    y = "Relative effect (%)"
+  ) +
+  theme_bw()+
+  theme(text = element_text(size = 10),
+        axis.title = element_text(face = "bold", size = 12))
+
+T_plot/R_plot/V_plot
 ```
 
 ```{r}
@@ -2585,14 +2639,14 @@ curves_by_year_vpd <- rr_by_year(
 )
 
 
-curves_by_year_rain %>% 
-  filter(at>=5) %>% 
+curves_by_year_vpd %>% 
+  filter(at>=0.66) %>% 
   ggplot(aes(at,RR_horizontal,group = as.factor(year), colour = as.factor(year)))+
   geom_smooth(se = F)
 
 mean(res_v$RR_vertical)
-res_r %>% 
-  ggplot(aes((RR_vertical-1)*100))+
+res_v %>%
+  ggplot(aes(RR_horizontal))+
   geom_histogram(color = "white", bins = 10, fill = "steelblue")+
   theme_bw()
 
@@ -2654,6 +2708,32 @@ df_join %>%
   filter(!AUC_excess<0) %>% 
   ggplot(aes(AUC_excess,sev_mean))+
   geom_point()
+```
+```{r}
+wx_summarise1 = wx_use %>% 
+  filter(dpp <= 85) %>% 
+  group_by(year) %>% 
+  summarise(
+    TMEAN = mean(tmean),
+    TMEAN_low = quantile(tmean,0.025),
+    TMEAN_high = quantile(tmean,0.975),
+    RAIN = mean(rain),
+    RAIN_low = quantile(rain,0.025),
+    RAIN_high = quantile(rain,0.975),
+    VPD = mean(vpd),
+    VPD_low = quantile(vpd,0.025),
+    VPD_high = quantile(vpd,0.975)
+  )
+
+
+wx_use %>% 
+  filter(year == 2018) %>% 
+  ggplot(aes(dpp,rain_cum, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+cor(wx_use$dpp,wx_use$rain_cum)
 ```
 
 
