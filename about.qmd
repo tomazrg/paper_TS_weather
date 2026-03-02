@@ -2372,7 +2372,7 @@ summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
     AUC <- sum(diff(g) * zoo::rollmean(rr - 1, 2))
     tibble::tibble(
       year = as.integer(yr),
-      RR_mean = (mean(rr, na.rm=TRUE)-1)*100,
+      RR_mean = (median(rr, na.rm=TRUE)-1)*100,
       RR_max  = max(rr, na.rm=TRUE),
       at_max  = g[which.max(rr)],
       AUC_excess = AUC
@@ -2726,14 +2726,53 @@ wx_summarise1 = wx_use %>%
   )
 
 
-wx_use %>% 
+tmax_y_plot_2018 = wx_use %>% 
+  filter(year == 2018) %>% 
+  ggplot(aes(dpp,tmax, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+rain_y_plot_2018 = wx_use %>% 
   filter(year == 2018) %>% 
   ggplot(aes(dpp,rain_cum, group = as.factor(study)))+
   geom_smooth(se = F, color = "black")+
   scale_colour_viridis_d()+
   theme_bw()
 
-cor(wx_use$dpp,wx_use$rain_cum)
+vpd_y_plot_2018 = wx_use %>% 
+  filter(year == 2018) %>% 
+  ggplot(aes(dpp,vpd, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+
+
+tmax_y_plot_2024 = wx_use %>% 
+  filter(year == 2024) %>% 
+  ggplot(aes(dpp,tmax, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+rain_y_plot_2024 = wx_use %>% 
+  filter(year == 2024) %>% 
+  ggplot(aes(dpp,rain_cum, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+vpd_y_plot_2024 = wx_use %>% 
+  filter(year == 2024) %>% 
+  ggplot(aes(dpp,vpd, group = as.factor(study)))+
+  geom_smooth(se = F, color = "black")+
+  scale_colour_viridis_d()+
+  theme_bw()
+
+(T_plot/R_plot/V_plot)|(tmax_y_plot_2018/rain_y_plot_2018/vpd_y_plot_2018)|(tmax_y_plot_2024/rain_y_plot_2024/vpd_y_plot_2024)
+
+ggsave("fig/annual_effect_phase.png", dpi = 600, height = 8, width = 12)
 ```
 
 
