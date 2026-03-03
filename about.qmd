@@ -71,6 +71,63 @@ epi_use <- epi |>
 
 epi_use
 ```
+```{r}
+epi_use %>% 
+  summarise(
+    mean = mean(sev),
+    sd = sd(sev),
+    min = min(sev),
+    max = max(sev)
+  )
+```
+
+
+```{r}
+mean_year = epi_use %>% 
+  group_by(year) %>% 
+  summarise(
+    mean = mean(sev),
+    min = min(sev),
+    max = max(sev),
+    sd = sd(sev))
+
+mean_year$year = mean_year$year-1
+mean_year
+```
+```{r}
+mean_year %>% 
+  ggplot(aes(year,mean))+
+  geom_line()+
+  geom_point()+
+  theme_bw()+
+  scale_x_continuous(breaks=c(2012,2013,2014,2015,2016,2017,
+                              2018,2019,2020,2021,2022,2023,2024), limits = c(2012,2024))
+```
+
+
+```{r}
+epi_use %>% 
+  group_by(state) %>% 
+  summarise(
+    mean = mean(sev),
+    min = min(sev),
+    max = max(sev),
+    sd = sd(sev)
+  )
+```
+
+
+```{r}
+epi_use %>% 
+  group_by(year,state) %>% 
+  summarise(
+    mean = mean(sev)
+  ) %>% 
+  ggplot(aes(as.factor(year),mean))+
+  geom_bar(stat = "identity")+
+  facet_wrap(~state)+
+  theme(axis.text.x = element_text(angle = 45))
+```
 
 ```{r, echo=TRUE, eval=FALSE}
 library(r4pde)
@@ -3687,35 +3744,6 @@ wx_use2 %>%
   filter(state.x == "TO")
 
 ```
-```{r}
-wx_use2 %>% 
-  group_by(state.x) %>% 
-  summarise(
-    mean = mean(sev),
-    min = min(sev),
-    max = max(sev)
-  )
-```
-```{r}
-wx_use2 %>% 
-  group_by(year.x) %>% 
-  summarise(
-    mean = mean(sev),
-    min = min(sev),
-    max = max(sev))
-```
-
-
-```{r}
-wx_use2 %>% 
-  group_by(year.x,state.x) %>% 
-  summarise(
-    mean = mean(sev)
-  ) %>% 
-  ggplot(aes(as.factor(year.x),mean))+
-  geom_bar(stat = "identity")+
-  facet_wrap(~state.x)
-```
 
 ```{r}
 vpd_state = wx_use2 %>% 
@@ -3853,7 +3881,7 @@ ggplot()+
   geom_sf(data = SUL, fill = "gray95", color = "gray95") +
   geom_sf(data = BRA, fill = "gray98", color= "gray60", size =0.2) +
   geom_sf(data = states, aes(x = longitude, y = latitude), fill = "white", color = "gray40", size = 0.2) +
-  geom_jitter(data = map, aes(as.numeric(lon), as.numeric(lat), size = mean_sev), alpha = 0.8, color = "#002f61") +
+  geom_jitter(data = map, aes(as.numeric(lon), as.numeric(lat)), size = 4, alpha = 0.8, color = "#002f61") +
   geom_text(data = states, aes(x = longitude, y = latitude,  label = id), size = 3, hjust = 0.8, fontface = "bold")+
   labs(x = "Longitude", y = "Latitude", color = "Region", size = "Number of Trials") +
   scale_size_continuous(range = c(1,5), breaks = c(1,5,12))+
@@ -3876,6 +3904,8 @@ ggplot()+
         )+
   annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.5, "in"), pad_y = unit(0.5, "in"), style = north_arrow_orienteering(fill = c("gray80", "gray96")), height = unit(0.9, "cm"), width = unit(0.8, "cm"))+
   guides(size=F)
+
+map_plot
 ```
 
 
