@@ -3793,3 +3793,131 @@ tmax_state+rain_state+vpd_state
 ggsave("fig/dpp_state.png", dpi = 600, width = 14, height = 10)
 ```
 
+# Map
+
+```{r}
+map = epi_use %>% 
+  dplyr::select(study,year,location,state,latitude,longitude,sev)
+
+colnames(map) = c("study","year","location","state","lat","lon","mean_sev")
+
+library(scales)
+library(ggspatial) 
+library(readxl)
+library(ggrepel)
+library(cowplot)
+library(rnaturalearth)
+
+BRA = ne_states(
+  country = "Brazil",
+  returnclass = "sf"
+)
+
+
+
+states <- filter(BRA, 
+                 name_pt == "Paraná"|
+                 name_pt == "São Paulo"|
+                 name_pt == "Mato Grosso"|
+                 name_pt == "Mato Grosso do Sul"|
+                 name_pt == "Goiás"|
+                 name_pt == "Minas Gerais"|
+                 name_pt == "Distrito Federal"|
+                 name_pt == "Tocantins"|
+                 name_pt == "Bahia")
+
+states = states %>% 
+  mutate(id = case_when(
+    name_pt == "Paraná" ~ "PR",
+    name_pt == "São Paulo" ~ "SP",
+    name_pt == "Mato Grosso" ~ "MT",
+    name_pt == "Mato Grosso do Sul" ~ "MS",
+    name_pt == "Goiás" ~ "GO",
+    name_pt == "Minas Gerais" ~ "MG",
+    name_pt == "Distrito Federal" ~ "DF",
+    name_pt == "Tocantins" ~ "TO",
+    name_pt == "Bahia" ~ "BA"))
+
+SUL = ne_states(
+  country = c("Argentina", "Uruguay", "Paraguay", "Colombia", "Bolivia"),
+  returnclass = "sf")
+br_sf <- ne_states(geounit = "brazil",
+                   returnclass = "sf")
+
+unique(map$state)
+```
+
+```{r}
+map_plot = map %>% 
+ggplot()+
+  geom_sf(data = SUL, fill = "gray95", color = "gray95") +
+  geom_sf(data = BRA, fill = "gray98", color= "gray60", size =0.2) +
+  geom_sf(data = states, aes(x = longitude, y = latitude), fill = "white", color = "gray40", size = 0.2) +
+  geom_jitter(data = map, aes(as.numeric(lon), as.numeric(lat), size = mean_sev), alpha = 0.8, color = "#002f61") +
+  geom_text(data = states, aes(x = longitude, y = latitude,  label = id), size = 3, hjust = 0.8, fontface = "bold")+
+  labs(x = "Longitude", y = "Latitude", color = "Region", size = "Number of Trials") +
+  scale_size_continuous(range = c(1,5), breaks = c(1,5,12))+
+  #theme_bw()+
+  theme_minimal_grid()+
+  annotation_scale(location = "bl", width_hint = 0.2) +
+  coord_sf(xlim = c(-65,-40), ylim = c(-32, -9), expand = FALSE)+
+  #scale_color_calc()+
+  theme(legend.position = "right",
+        legend.justification = "center",
+        legend.title.align = 0.5,
+        legend.title = element_text(size = 10, face = "bold"),
+        legend.text = element_text(size = 10),
+        axis.text.x =  element_text(size = 9),
+        axis.text.y = element_text(size = 9),
+        axis.title.x = element_text(size=12, face = "bold"),
+        axis.title.y = element_text(size=12, face = "bold"),
+        panel.border = element_rect(color = "gray50", size=.2),
+        panel.background = element_rect(fill = "#d2eeff")
+        )+
+  annotation_north_arrow(location = "bl", which_north = "true", pad_x = unit(0.5, "in"), pad_y = unit(0.5, "in"), style = north_arrow_orienteering(fill = c("gray80", "gray96")), height = unit(0.9, "cm"), width = unit(0.8, "cm"))+
+  guides(size=F)
+```
+
+
+```{r}
+sev_plot = map %>% 
+  ggplot(aes(mean_sev))+
+  geom_histogram(fill = "#002f61", color = "white", bins = 15)+
+  ggthemes::theme_few()+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  theme(text = element_text(size = 12),
+        axis.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+```{r}
+year_plot= map %>% 
+dplyr::group_by(year) %>% 
+  summarise(
+   mean_sev = mean(mean_sev)
+  ) %>% 
+  ggplot(aes(as.factor(year-1),mean_sev))+
+  geom_bar(stat = "identity" ,fill = "#002f61")+
+  ggthemes::theme_few()+
+  labs(x = "Year",
+       y = "Severity (%)")+
+  theme(text = element_text(size = 12),
+        axis.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+year_plot
+```
+
+```{r,eval = FALSE, echo = TRUE}
+
+(map_plot + (sev_plot / year_plot)) + 
+  plot_layout(design = "AB
+                        AB", widths = c(2, 1)) +
+  plot_annotation(tag_levels = "a", tag_prefix = "(", tag_suffix = ")") & 
+  theme(plot.tag = element_text(face = "bold", size = 12), label_x = -0.03, label_y = 1)
+
+
+ggsave("fig/map_sev_year.png", dpi = 600, bg = "white",
+       width = 12, height = 8)
+```
