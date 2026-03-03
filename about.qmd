@@ -1593,6 +1593,7 @@ df_heat <- df_heat %>%
                values_to = "PERC") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
+
 ```
 
 ```{r}
@@ -1618,11 +1619,12 @@ ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
   geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
                     label.padding = unit(0.15, "lines"), size = 3.2) +
   # paleta perceptual e centrada no 0 (diverging)
-  scale_fill_gradient2(
-    low = "#2c7bb6", mid = "white", high = "#d7191c",
-    midpoint = 0, limits = c(-max_abs, max_abs),
-    oob = squish, name = "RR (%)"
-  ) +
+scale_fill_gradient2(
+  low = "#2c7bb6", mid = "white", high = "#d7191c",
+  midpoint = 0, limits = c(-50, 50),
+  breaks = seq(-50, 50, by = 10),
+  oob = squish, name = "RR (%)"
+)+
   # eixos e guias
   scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
