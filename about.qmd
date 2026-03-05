@@ -3953,3 +3953,1349 @@ year_plot
 ggsave("fig/map_sev_year.png", dpi = 600, bg = "white",
        width = 12, height = 8)
 ```
+# SEVERIDADE
+
+## TMAX
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(dlnm)
+  library(glmmTMB)
+  library(ggplot2)
+})
+
+# ----------------------------
+# Entradas esperadas:
+# fit_sel, dat, wx_use, cb_templates, LAG_MAX
+# wx_use precisa ter: epi_id, tmax, rain_cum, vpd (ou pelo menos epi_id e tmax para n_ref)
+# ----------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"), exists("cb_templates"), exists("LAG_MAX"))
+
+# ---- 1) utilitários ----
+get_cb_names <- function(dat, var) {
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
+
+# comprimento típico (igual você vinha fazendo)
+n_ref <- wx_use |>
+  dplyr::filter(!is.na(tmax)) |>
+  dplyr::count(epi_id) |>
+  dplyr::pull(n) |>
+  stats::median() |>
+  as.integer()
+
+# cria série para um cenário:
+# - se band = NULL: constante no tempo todo
+# - se band = c(a,b): aplica "value" apenas nos lags dentro da banda,
+#   e "cen" no restante (para isolar fase)
+make_series_band <- function(value, cen, n_ref, band = NULL) {
+  x <- rep(cen, n_ref)
+
+  if (!is.null(band)) {
+    # índice do tempo: último ponto = "hoje", anteriores = lags
+    # lag 0 corresponde ao último elemento (n_ref)
+    lags <- 0:(n_ref - 1)
+    idx  <- which(lags %in% band)
+
+    # map lag -> posição no vetor:
+    # lag 0 -> n_ref, lag 1 -> n_ref-1, ..., lag L -> n_ref-L
+    pos <- n_ref - idx
+    x[pos] <- value
+  } else {
+    x[] <- value
+  }
+  x
+}
+
+# extrai a última linha da crossbasis (CONSISTENTE com seu modelo)
+last_cb_row <- function(x, cb_template, LAG_MAX) {
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[length(x), ])
+}
+
+# predição manual (mais rápida e totalmente consistente com beta-logit pop-level)
+# eta = b0 + sum(b_t*bt) + sum(b_r*br) + sum(b_v*bv)
+predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
+  b0 <- unname(beta["(Intercept)"])
+  eta <- b0 +
+    sum(unname(beta[nm_t]) * bt) +
+    sum(unname(beta[nm_r]) * br) +
+    sum(unname(beta[nm_v]) * bv)
+  mu <- plogis(eta)
+  c(eta = eta, mu = mu)
+}
+
+# ---- 2) nomes das colunas cb_* do modelo ----
+nm_t <- get_cb_names(dat, "tmax")
+nm_r <- get_cb_names(dat, "rain_cum")
+nm_v <- get_cb_names(dat, "vpd")
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# ---- 3) coeficientes fixos do modelo ----
+beta <- fixef(fit_sel)$cond
+# checagem
+stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
+
+# ---- 4) definir valores de referência (fixos) para as OUTRAS variáveis ----
+# Você pode trocar P50 por mean, P25, etc.
+cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
+cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
+cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
+
+# bases fixas no cenário de referência (para rain e vpd)
+xr0 <- make_series_band(value = cen_r, cen = cen_r, n_ref = n_ref, band = NULL)
+xv0 <- make_series_band(value = cen_v, cen = cen_v, n_ref = n_ref, band = NULL)
+br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
+bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
+
+# baseline absoluto (tmax também no cen)
+xt0 <- make_series_band(value = cen_t, cen = cen_t, n_ref = n_ref, band = NULL)
+bt0 <- last_cb_row(xt0, cb_templates[["tmax"]], LAG_MAX)
+base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
+sev_base_pct <- 100 * base["mu"]
+
+# ---- 5) grid da variável de interesse (ex.: tmax) ----
+t_grid <- seq(19, 34, length.out = 200)  # ajuste como quiser
+
+# ---- 6) definir fases (bandas de lag) ----
+band_later   <- 0:40
+band_earlier <- 41:85
+
+# ---- 7) calcular curvas: Later e Earlier ----
+# Para isolar a fase, aplicamos o "valor" só naquela faixa de lag,
+# e mantemos o restante no "cen_t".
+calc_curve_phase <- function(values, band) {
+  out <- lapply(values, function(val) {
+    xt <- make_series_band(value = val, cen = cen_t, n_ref = n_ref, band = band)
+    bt <- last_cb_row(xt, cb_templates[["tmax"]], LAG_MAX)
+    pr <- predict_eta_mu(bt, br0, bv0, beta, nm_t, nm_r, nm_v)
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_later   <- calc_curve_phase(t_grid, band_later)
+sev_earlier <- calc_curve_phase(t_grid, band_earlier)
+
+df_line <- data.frame(
+  tmax = rep(t_grid, 2),
+  sev_pct = c(sev_earlier, sev_later),
+  phase = rep(c("Earlier", "Later"), each = length(t_grid))
+)
+
+# ---- 8) plot (igual seu painel da direita) ----
+p_tmax = df_line %>% 
+  #filter(phase == "Later") %>% 
+  ggplot(aes(tmax, sev_pct, linetype = phase)) +
+  geom_line(linewidth = 1.4) +
+ # geom_hline(yintercept = sev_base_pct, linetype = 2, alpha = 0.6) +
+  labs(
+    x = "Temperature (°C)",
+    y = "Severity (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+
+print(p)
+
+fixef(fit_sel)$cond["(Intercept)"]
+mean(predict(fit_sel, type="response", re.form=NA))
+
+mean(epi_use$sev)
+median(wx_use$vpd)
+median(wx_use$tmax)
+```
+
+
+
+```{r}
+# ==============================================================
+# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
+# - Efeito de uma variável (ex.: tmax) ao longo dos lags
+# - BASELINE coerente com o "cen" do DLNM:
+#     baseline = predição pop-level no cenário de referência:
+#       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
+# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# ==============================================================
+# Entradas esperadas no ambiente:
+#   fit_sel      : glmmTMB beta_family(link="logit")
+#   dat          : data.frame usado no ajuste (contém colunas cb_*)
+#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
+#   LAG_MAX      : lag máximo usado no crossbasis
+# ==============================================================
+
+suppressPackageStartupMessages({
+  library(dlnm)
+  library(glmmTMB)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+})
+
+# --------------------- 0) Checagens ---------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
+
+# --------------------- 1) Parâmetros --------------------------
+var <- "tmax"   # variável-alvo (tmax | rain_cum | vpd)
+
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
+  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+}
+
+# Faixa do heatmap (ajuste aqui)
+x_all <- wx_use[[var]]
+if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
+
+# "cen" do DLNM: P50 da variável-alvo
+P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# aparar faixa ao intervalo observado para evitar extrapolação
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
+at_vals  <- seq(19, 34, length.out = 1000)  # <<< ajuste livre #29,34
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+
+# Lags para plot
+lag_max_plot <- 85L                 # <<< ajuste livre
+lag_max_plot <- min(lag_max_plot, LAG_MAX)
+
+# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+cb <- cb_templates[[var]]
+
+cf_all <- coef(summary(fit_sel))$cond[, 1]
+vc_all <- vcov(fit_sel)$cond
+
+pref <- paste0("^cb_", var, "_")
+
+idx_beta <- grep(pref, names(cf_all))
+if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+beta <- cf_all[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc_all))
+idx_cols <- grep(pref, colnames(vc_all))
+V <- vc_all[idx_rows, idx_cols, drop = FALSE]
+
+# Checagens
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+
+# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50_var,
+  bylag = 1
+)
+
+mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+
+# Ordenar lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf) - 1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# manter 0..lag_max_plot
+keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf <- mf[, keep, drop = FALSE]
+lag_idx <- lag_idx[keep]
+
+# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
+# Referências (P50) para TODAS as variáveis do modelo
+P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
+P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
+P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
+
+# n_ref (comprimento típico)
+n_ref <- wx_use %>%
+  filter(!is.na(tmax)) %>%
+  count(epi_id) %>%
+  pull(n) %>%
+  stats::median() %>%
+  as.integer()
+
+# nomes cb_* no dat
+nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
+nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
+nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
+
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# função: última linha do crossbasis para série constante
+last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
+  x <- rep(value, n_ref)
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[n_ref, ])
+}
+
+# cb "última linha" no cenário de referência
+bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
+br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
+bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
+
+# newdata referência (1 linha)
+nd0 <- data.frame(siteyear = NA)
+nd0[nm_t] <- as.list(bt0)
+nd0[nm_r] <- as.list(br0)
+nd0[nm_v] <- as.list(bv0)
+
+# baseline pop-level (efeitos aleatórios zerados)
+sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
+
+# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+mf_cum <- t(apply(mf, 1, cumsum))
+
+SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
+SEVpct_mat <- 100 * SEV_mat                       # 0–100
+
+# (opcional) diferença absoluta vs baseline (em pontos percentuais)
+SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
+
+# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
+OR_mat <- exp(mf_cum)
+
+# --------------------- 6) Data frames long (heatmap) -------------------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+
+df_sev <- df_sev %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_pct") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+df_diff <- as.data.frame(SEVdiffpct_mat)
+colnames(df_diff) <- paste0("lag_", lag_idx)
+
+df_diff <- df_diff %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+# --------------------- 7) Heatmaps (opcional) --------------------------------
+p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "Severity (%)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)"),
+    title = paste0("Predicted severity (%) – varying ", var),
+    subtitle = paste0(
+      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
+      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
+      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))
+
+p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
+  geom_raster() +
+  scale_fill_viridis_c(name = "Δ (pp)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)")) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))+
+  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+
+print(p_heat_abs)
+print(p_heat_diff)
+
+
+# --------------------- 9) Objetos finais -------------------------------------
+# df_sev, df_diff  : long tables
+# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
+# p_heat_abs/diff  : heatmaps
+# p_band_abs/diff  : plots por bandas
+# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
+# P50_var          : cen usado no crosspred para var
+
+min(df_sev)
+```
+
+
+
+## RAIN
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(dlnm)
+  library(glmmTMB)
+  library(ggplot2)
+})
+
+# ----------------------------
+# Entradas esperadas:
+# fit_sel, dat, wx_use, cb_templates, LAG_MAX
+# wx_use precisa ter: epi_id, tmax, rain_cum, vpd (ou pelo menos epi_id e tmax para n_ref)
+# ----------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"), exists("cb_templates"), exists("LAG_MAX"))
+
+# ---- 1) utilitários ----
+get_cb_names <- function(dat, var) {
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
+
+# comprimento típico (igual você vinha fazendo)
+n_ref <- wx_use |>
+  dplyr::filter(!is.na(tmax)) |>
+  dplyr::count(epi_id) |>
+  dplyr::pull(n) |>
+  stats::median() |>
+  as.integer()
+
+# cria série para um cenário:
+# - se band = NULL: constante no tempo todo
+# - se band = c(a,b): aplica "value" apenas nos lags dentro da banda,
+#   e "cen" no restante (para isolar fase)
+make_series_band <- function(value, cen, n_ref, band = NULL) {
+  x <- rep(cen, n_ref)
+
+  if (!is.null(band)) {
+    # índice do tempo: último ponto = "hoje", anteriores = lags
+    # lag 0 corresponde ao último elemento (n_ref)
+    lags <- 0:(n_ref - 1)
+    idx  <- which(lags %in% band)
+
+    # map lag -> posição no vetor:
+    # lag 0 -> n_ref, lag 1 -> n_ref-1, ..., lag L -> n_ref-L
+    pos <- n_ref - idx
+    x[pos] <- value
+  } else {
+    x[] <- value
+  }
+  x
+}
+
+# extrai a última linha da crossbasis (CONSISTENTE com seu modelo)
+last_cb_row <- function(x, cb_template, LAG_MAX) {
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[length(x), ])
+}
+
+# predição manual (mais rápida e totalmente consistente com beta-logit pop-level)
+# eta = b0 + sum(b_t*bt) + sum(b_r*br) + sum(b_v*bv)
+predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
+  b0 <- unname(beta["(Intercept)"])
+  eta <- b0 +
+    sum(unname(beta[nm_t]) * bt) +
+    sum(unname(beta[nm_r]) * br) +
+    sum(unname(beta[nm_v]) * bv)
+  mu <- plogis(eta)
+  c(eta = eta, mu = mu)
+}
+
+# ---- 2) nomes das colunas cb_* do modelo ----
+nm_t <- get_cb_names(dat, "tmax")
+nm_r <- get_cb_names(dat, "rain_cum")
+nm_v <- get_cb_names(dat, "vpd")
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# ---- 3) coeficientes fixos do modelo ----
+beta <- fixef(fit_sel)$cond
+# checagem
+stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
+
+# ---- 4) definir valores de referência (fixos) para as OUTRAS variáveis ----
+# Você pode trocar P50 por mean, P25, etc.
+cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
+cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
+cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
+
+# bases fixas no cenário de referência (para rain e vpd)
+xr0 <- make_series_band(value = cen_r, cen = cen_r, n_ref = n_ref, band = NULL)
+xv0 <- make_series_band(value = cen_v, cen = cen_v, n_ref = n_ref, band = NULL)
+br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
+bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
+
+# baseline absoluto (tmax também no cen)
+xt0 <- make_series_band(value = cen_t, cen = cen_t, n_ref = n_ref, band = NULL)
+bt0 <- last_cb_row(xt0, cb_templates[["tmax"]], LAG_MAX)
+base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
+sev_base_pct <- 100 * base["mu"]
+
+# ---- 5) grid da variável de interesse (ex.: tmax) ----
+t_grid <- seq(0, 600, length.out = 200)  # ajuste como quiser
+
+# ---- 6) definir fases (bandas de lag) ----
+band_later   <- 0:85
+band_earlier <- 41:85
+
+# ---- 7) calcular curvas: Later e Earlier ----
+# Para isolar a fase, aplicamos o "valor" só naquela faixa de lag,
+# e mantemos o restante no "cen_t".
+calc_curve_phase <- function(values, band) {
+  out <- lapply(values, function(val) {
+    xt <- make_series_band(value = val, cen = cen_t, n_ref = n_ref, band = band)
+    bt <- last_cb_row(xt, cb_templates[["rain_cum"]], LAG_MAX)
+    pr <- predict_eta_mu(bt, br0, bv0, beta, nm_t, nm_r, nm_v)
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_later   <- calc_curve_phase(t_grid, band_later)
+sev_earlier <- calc_curve_phase(t_grid, band_earlier)
+
+df_line <- data.frame(
+  tmax = rep(t_grid, 2),
+  sev_pct = c(sev_earlier, sev_later),
+  phase = rep(c("Earlier", "Later"), each = length(t_grid))
+)
+
+# ---- 8) plot (igual seu painel da direita) ----
+p_rain = df_line %>% 
+  filter(phase == "Later") %>% 
+  ggplot(aes(tmax, sev_pct, linetype = phase)) +
+  geom_line(linewidth = 1.4) +
+ # geom_hline(yintercept = sev_base_pct, linetype = 2, alpha = 0.6) +
+  labs(
+    x = "Precipitation (mm)",
+    y = "Severity (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+print(p_rain)
+
+fixef(fit_sel)$cond["(Intercept)"]
+mean(predict(fit_sel, type="response", re.form=NA))
+
+mean(epi_use$sev)
+median(wx_use$vpd)
+median(wx_use$tmax)
+```
+
+
+
+```{r}
+# ==============================================================
+# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
+# - Efeito de uma variável (ex.: tmax) ao longo dos lags
+# - BASELINE coerente com o "cen" do DLNM:
+#     baseline = predição pop-level no cenário de referência:
+#       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
+# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# ==============================================================
+# Entradas esperadas no ambiente:
+#   fit_sel      : glmmTMB beta_family(link="logit")
+#   dat          : data.frame usado no ajuste (contém colunas cb_*)
+#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
+#   LAG_MAX      : lag máximo usado no crossbasis
+# ==============================================================
+
+suppressPackageStartupMessages({
+  library(dlnm)
+  library(glmmTMB)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+})
+
+# --------------------- 0) Checagens ---------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
+
+# --------------------- 1) Parâmetros --------------------------
+var <- "rain_cum"   # variável-alvo (tmax | rain_cum | vpd)
+
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
+  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+}
+
+# Faixa do heatmap (ajuste aqui)
+x_all <- wx_use[[var]]
+if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
+
+# "cen" do DLNM: P50 da variável-alvo
+P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# aparar faixa ao intervalo observado para evitar extrapolação
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
+at_vals  <- seq(0, 600, length.out = 1000)  # <<< ajuste livre #29,34
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+
+# Lags para plot
+lag_max_plot <- 85L                 # <<< ajuste livre
+lag_max_plot <- min(lag_max_plot, LAG_MAX)
+
+# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+cb <- cb_templates[[var]]
+
+cf_all <- coef(summary(fit_sel))$cond[, 1]
+vc_all <- vcov(fit_sel)$cond
+
+pref <- paste0("^cb_", var, "_")
+
+idx_beta <- grep(pref, names(cf_all))
+if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+beta <- cf_all[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc_all))
+idx_cols <- grep(pref, colnames(vc_all))
+V <- vc_all[idx_rows, idx_cols, drop = FALSE]
+
+# Checagens
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+
+# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50_var,
+  bylag = 1
+)
+
+mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+
+# Ordenar lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf) - 1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# manter 0..lag_max_plot
+keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf <- mf[, keep, drop = FALSE]
+lag_idx <- lag_idx[keep]
+
+# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
+# Referências (P50) para TODAS as variáveis do modelo
+P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
+P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
+P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
+
+# n_ref (comprimento típico)
+n_ref <- wx_use %>%
+  filter(!is.na(tmax)) %>%
+  count(epi_id) %>%
+  pull(n) %>%
+  stats::median() %>%
+  as.integer()
+
+# nomes cb_* no dat
+nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
+nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
+nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
+
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# função: última linha do crossbasis para série constante
+last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
+  x <- rep(value, n_ref)
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[n_ref, ])
+}
+
+# cb "última linha" no cenário de referência
+bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
+br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
+bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
+
+# newdata referência (1 linha)
+nd0 <- data.frame(siteyear = NA)
+nd0[nm_t] <- as.list(bt0)
+nd0[nm_r] <- as.list(br0)
+nd0[nm_v] <- as.list(bv0)
+
+# baseline pop-level (efeitos aleatórios zerados)
+sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
+
+# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+mf_cum <- t(apply(mf, 1, cumsum))
+
+SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
+SEVpct_mat <- 100 * SEV_mat                       # 0–100
+
+# (opcional) diferença absoluta vs baseline (em pontos percentuais)
+SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
+
+# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
+OR_mat <- exp(mf_cum)
+
+# --------------------- 6) Data frames long (heatmap) -------------------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+
+df_sev <- df_sev %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_pct") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+df_diff <- as.data.frame(SEVdiffpct_mat)
+colnames(df_diff) <- paste0("lag_", lag_idx)
+
+df_diff <- df_diff %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+# --------------------- 7) Heatmaps (opcional) --------------------------------
+p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "Severity (%)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)"),
+    title = paste0("Predicted severity (%) – varying ", var),
+    subtitle = paste0(
+      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
+      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
+      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))
+
+p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
+  geom_raster() +
+  scale_fill_viridis_c(name = "Δ (pp)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)")) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))+
+  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+
+print(p_heat_abs)
+print(p_heat_diff)
+
+
+# --------------------- 9) Objetos finais -------------------------------------
+# df_sev, df_diff  : long tables
+# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
+# p_heat_abs/diff  : heatmaps
+# p_band_abs/diff  : plots por bandas
+# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
+# P50_var          : cen usado no crosspred para var
+
+min(df_sev)
+```
+
+## VPD
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(dlnm)
+  library(glmmTMB)
+  library(ggplot2)
+})
+
+# ----------------------------
+# Entradas esperadas:
+# fit_sel, dat, wx_use, cb_templates, LAG_MAX
+# wx_use precisa ter: epi_id, tmax, rain_cum, vpd (ou pelo menos epi_id e tmax para n_ref)
+# ----------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"), exists("cb_templates"), exists("LAG_MAX"))
+
+# ---- 1) utilitários ----
+get_cb_names <- function(dat, var) {
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
+
+# comprimento típico (igual você vinha fazendo)
+n_ref <- wx_use |>
+  dplyr::filter(!is.na(tmax)) |>
+  dplyr::count(epi_id) |>
+  dplyr::pull(n) |>
+  stats::median() |>
+  as.integer()
+
+# cria série para um cenário:
+# - se band = NULL: constante no tempo todo
+# - se band = c(a,b): aplica "value" apenas nos lags dentro da banda,
+#   e "cen" no restante (para isolar fase)
+make_series_band <- function(value, cen, n_ref, band = NULL) {
+  x <- rep(cen, n_ref)
+
+  if (!is.null(band)) {
+    # índice do tempo: último ponto = "hoje", anteriores = lags
+    # lag 0 corresponde ao último elemento (n_ref)
+    lags <- 0:(n_ref - 1)
+    idx  <- which(lags %in% band)
+
+    # map lag -> posição no vetor:
+    # lag 0 -> n_ref, lag 1 -> n_ref-1, ..., lag L -> n_ref-L
+    pos <- n_ref - idx
+    x[pos] <- value
+  } else {
+    x[] <- value
+  }
+  x
+}
+
+# extrai a última linha da crossbasis (CONSISTENTE com seu modelo)
+last_cb_row <- function(x, cb_template, LAG_MAX) {
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[length(x), ])
+}
+
+# predição manual (mais rápida e totalmente consistente com beta-logit pop-level)
+# eta = b0 + sum(b_t*bt) + sum(b_r*br) + sum(b_v*bv)
+predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
+  b0 <- unname(beta["(Intercept)"])
+  eta <- b0 +
+    sum(unname(beta[nm_t]) * bt) +
+    sum(unname(beta[nm_r]) * br) +
+    sum(unname(beta[nm_v]) * bv)
+  mu <- plogis(eta)
+  c(eta = eta, mu = mu)
+}
+
+# ---- 2) nomes das colunas cb_* do modelo ----
+nm_t <- get_cb_names(dat, "tmax")
+nm_r <- get_cb_names(dat, "rain_cum")
+nm_v <- get_cb_names(dat, "vpd")
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# ---- 3) coeficientes fixos do modelo ----
+beta <- fixef(fit_sel)$cond
+# checagem
+stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
+
+# ---- 4) definir valores de referência (fixos) para as OUTRAS variáveis ----
+# Você pode trocar P50 por mean, P25, etc.
+cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
+cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
+cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
+
+# bases fixas no cenário de referência (para rain e vpd)
+xr0 <- make_series_band(value = cen_r, cen = cen_r, n_ref = n_ref, band = NULL)
+xv0 <- make_series_band(value = cen_v, cen = cen_v, n_ref = n_ref, band = NULL)
+br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
+bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
+
+# baseline absoluto (tmax também no cen)
+xt0 <- make_series_band(value = cen_t, cen = cen_t, n_ref = n_ref, band = NULL)
+bt0 <- last_cb_row(xt0, cb_templates[["tmax"]], LAG_MAX)
+base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
+sev_base_pct <- 100 * base["mu"]
+
+# ---- 5) grid da variável de interesse (ex.: tmax) ----
+t_grid <- seq(0.66, 2, length.out = 200)  # ajuste como quiser
+
+# ---- 6) definir fases (bandas de lag) ----
+band_later   <- 0:85
+band_earlier <- 41:85
+
+# ---- 7) calcular curvas: Later e Earlier ----
+# Para isolar a fase, aplicamos o "valor" só naquela faixa de lag,
+# e mantemos o restante no "cen_t".
+calc_curve_phase <- function(values, band) {
+  out <- lapply(values, function(val) {
+    xt <- make_series_band(value = val, cen = cen_t, n_ref = n_ref, band = band)
+    bt <- last_cb_row(xt, cb_templates[["vpd"]], LAG_MAX)
+    pr <- predict_eta_mu(bt, br0, bv0, beta, nm_t, nm_r, nm_v)
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_later   <- calc_curve_phase(t_grid, band_later)
+sev_earlier <- calc_curve_phase(t_grid, band_earlier)
+
+df_line <- data.frame(
+  tmax = rep(t_grid, 2),
+  sev_pct = c(sev_earlier, sev_later),
+  phase = rep(c("Earlier", "Later"), each = length(t_grid))
+)
+
+# ---- 8) plot (igual seu painel da direita) ----
+p_vpd = df_line %>% 
+  filter(phase == "Later") %>% 
+  ggplot(aes(tmax, sev_pct, linetype = phase)) +
+  geom_line(linewidth = 1.4) +
+ # geom_hline(yintercept = sev_base_pct, linetype = 2, alpha = 0.6) +
+  labs(
+    x = "VPD (kPa)",
+    y = "Severity (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+print(p_vpd)
+
+fixef(fit_sel)$cond["(Intercept)"]
+mean(predict(fit_sel, type="response", re.form=NA))
+
+mean(epi_use$sev)
+median(wx_use$vpd)
+median(wx_use$tmax)
+```
+
+```{r}
+# ---- 5) grid da variável de interesse (agora é VPD) ----
+v_grid <- seq(0.66, 2, length.out = 200)
+
+# ---- 6) definir fases (bandas de lag) ----
+band_later   <- 0:40
+band_earlier <- 41:85
+
+# ---- 7) calcular curvas: Later e Earlier (VARIANDO VPD) ----
+calc_curve_phase_vpd <- function(values, band) {
+  out <- lapply(values, function(val) {
+
+    # 1) série de VPD: aplica "val" só na banda, resto fica no cen_v
+    xv <- make_series_band(value = val, cen = cen_v, n_ref = n_ref, band = band)
+
+    # 2) crossbasis do VPD (bv)
+    bv <- last_cb_row(xv, cb_templates[["vpd"]], LAG_MAX)
+
+    # 3) predição: tmax e chuva FIXOS (bt0, br0) + vpd VARIÁVEL (bv)
+    pr <- predict_eta_mu(bt0, br0, bv, beta, nm_t, nm_r, nm_v)
+
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_later   <- calc_curve_phase_vpd(v_grid, band_later)
+sev_earlier <- calc_curve_phase_vpd(v_grid, band_earlier)
+
+df_line <- data.frame(
+  vpd = rep(v_grid, 2),
+  sev_pct = c(sev_earlier, sev_later),
+  phase = rep(c("Earlier", "Later"), each = length(v_grid))
+)
+
+# ---- 8) plot (Late apenas, como você fez) ----
+p_vpd <- df_line %>%
+  #filter(phase == "Earlier") %>%
+  ggplot(aes(vpd, sev_pct, color = phase)) +
+  geom_line(linewidth = 1.4) +
+  labs(x = "VPD (kPa)", y = "Severity (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    legend.position = "none"
+  )
+
+print(p_vpd)
+```
+```{r}
+# ===============================
+# VARIANDO TMAX | LATE (0:85)
+# ===============================
+
+# grid de temperatura
+t_grid <- seq(19, 34, length.out = 200)
+
+band_late <- 0:40
+
+calc_curve_phase_tmax <- function(values, band) {
+  out <- lapply(values, function(val) {
+
+    # tmax variável apenas na banda
+    xt <- make_series_band(value = val, cen = cen_t,
+                           n_ref = n_ref, band = band)
+    bt <- last_cb_row(xt, cb_templates[["tmax"]], LAG_MAX)
+
+    # rain e vpd FIXOS
+    pr <- predict_eta_mu(bt, br0, bv0, beta, nm_t, nm_r, nm_v)
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_tmax_late <- calc_curve_phase_tmax(t_grid, band_late)
+
+df_tmax <- data.frame(
+  tmax = t_grid,
+  sev_pct = sev_tmax_late
+)
+
+# plot
+p_tmax <- ggplot(df_tmax, aes(tmax, sev_pct)) +
+  geom_smooth(linewidth = 1.4, colour = "#b2182b", se = F) +
+  labs(
+    x = "Maximum temperature (°C)",
+    y = "Severity (%)",
+    title = "Later"
+   # title = "Marginal effect of maximum temperature on disease severity",
+    #subtitle = "Late window (0–85 days before assessment); rain and VPD fixed at P50"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+print(p_tmax)
+```
+```{r}
+# ===============================
+# VARIANDO RAIN_CUM | LATE (0:85)
+# ===============================
+
+# grid de chuva acumulada
+r_grid <- seq(0, 600, length.out = 200)
+
+band_late <- 0:40
+
+calc_curve_phase_rain <- function(values, band) {
+  out <- lapply(values, function(val) {
+
+    # rain variável apenas na banda
+    xr <- make_series_band(value = val, cen = cen_r,
+                           n_ref = n_ref, band = band)
+    br <- last_cb_row(xr, cb_templates[["rain_cum"]], LAG_MAX)
+
+    # tmax e vpd FIXOS
+    pr <- predict_eta_mu(bt0, br, bv0, beta, nm_t, nm_r, nm_v)
+    100 * pr["mu"]
+  })
+  as.numeric(out)
+}
+
+sev_rain_late <- calc_curve_phase_rain(r_grid, band_late)
+
+df_rain <- data.frame(
+  rain_cum = r_grid,
+  sev_pct = sev_rain_late
+)
+
+# plot
+p_rain <- ggplot(df_rain, aes(rain_cum, sev_pct)) +
+  geom_smooth(linewidth = 1.4, colour = "#2166ac") +
+  labs(
+    x = "Accumulated precipitation (mm)",
+    y = "Severity (%)",
+    title = "Marginal effect of accumulated precipitation on disease severity",
+    subtitle = "Late window (0–85 days before assessment); temperature and VPD fixed at P50"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold")
+  )
+
+print(p_rain)
+```
+
+
+```{r}
+# ==============================================================
+# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
+# - Efeito de uma variável (ex.: tmax) ao longo dos lags
+# - BASELINE coerente com o "cen" do DLNM:
+#     baseline = predição pop-level no cenário de referência:
+#       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
+# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# ==============================================================
+# Entradas esperadas no ambiente:
+#   fit_sel      : glmmTMB beta_family(link="logit")
+#   dat          : data.frame usado no ajuste (contém colunas cb_*)
+#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
+#   LAG_MAX      : lag máximo usado no crossbasis
+# ==============================================================
+
+suppressPackageStartupMessages({
+  library(dlnm)
+  library(glmmTMB)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(scales)
+})
+
+# --------------------- 0) Checagens ---------------------------
+stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
+
+# --------------------- 1) Parâmetros --------------------------
+var <- "vpd"   # variável-alvo (tmax | rain_cum | vpd)
+
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
+  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+}
+
+# Faixa do heatmap (ajuste aqui)
+x_all <- wx_use[[var]]
+if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
+
+# "cen" do DLNM: P50 da variável-alvo
+P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
+
+# aparar faixa ao intervalo observado para evitar extrapolação
+grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
+at_vals  <- seq(0.66, 2, length.out = 1000)  # <<< ajuste livre #29,34
+at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
+if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+
+# Lags para plot
+lag_max_plot <- 85L                 # <<< ajuste livre
+lag_max_plot <- min(lag_max_plot, LAG_MAX)
+
+# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+cb <- cb_templates[[var]]
+
+cf_all <- coef(summary(fit_sel))$cond[, 1]
+vc_all <- vcov(fit_sel)$cond
+
+pref <- paste0("^cb_", var, "_")
+
+idx_beta <- grep(pref, names(cf_all))
+if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+beta <- cf_all[idx_beta]
+
+idx_rows <- grep(pref, rownames(vc_all))
+idx_cols <- grep(pref, colnames(vc_all))
+V <- vc_all[idx_rows, idx_cols, drop = FALSE]
+
+# Checagens
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+
+# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+cp <- dlnm::crosspred(
+  cb,
+  coef  = beta,
+  vcov  = V,
+  at    = at_vals,
+  cen   = P50_var,
+  bylag = 1
+)
+
+mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+
+# Ordenar lags
+lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
+if (anyNA(lag_idx)) {
+  lag_idx <- 0:(ncol(mf) - 1)
+  colnames(mf) <- paste0("lag", lag_idx)
+}
+ord <- order(lag_idx)
+mf <- mf[, ord, drop = FALSE]
+lag_idx <- lag_idx[ord]
+
+# manter 0..lag_max_plot
+keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
+mf <- mf[, keep, drop = FALSE]
+lag_idx <- lag_idx[keep]
+
+# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
+# Referências (P50) para TODAS as variáveis do modelo
+P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
+P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
+P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
+
+# n_ref (comprimento típico)
+n_ref <- wx_use %>%
+  filter(!is.na(tmax)) %>%
+  count(epi_id) %>%
+  pull(n) %>%
+  stats::median() %>%
+  as.integer()
+
+# nomes cb_* no dat
+nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
+nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
+nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
+
+stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
+
+# função: última linha do crossbasis para série constante
+last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
+  x <- rep(value, n_ref)
+  cbx <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cbx[n_ref, ])
+}
+
+# cb "última linha" no cenário de referência
+bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
+br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
+bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
+
+# newdata referência (1 linha)
+nd0 <- data.frame(siteyear = NA)
+nd0[nm_t] <- as.list(bt0)
+nd0[nm_r] <- as.list(br0)
+nd0[nm_v] <- as.list(bv0)
+
+# baseline pop-level (efeitos aleatórios zerados)
+sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
+
+# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+mf_cum <- t(apply(mf, 1, cumsum))
+
+SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
+SEVpct_mat <- 100 * SEV_mat                       # 0–100
+
+# (opcional) diferença absoluta vs baseline (em pontos percentuais)
+SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
+
+# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
+OR_mat <- exp(mf_cum)
+
+# --------------------- 6) Data frames long (heatmap) -------------------------
+df_sev <- as.data.frame(SEVpct_mat)
+colnames(df_sev) <- paste0("lag_", lag_idx)
+
+df_sev <- df_sev %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_pct") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+df_diff <- as.data.frame(SEVdiffpct_mat)
+colnames(df_diff) <- paste0("lag_", lag_idx)
+
+df_diff <- df_diff %>%
+  mutate(var_val = at_vals) %>%
+  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
+  mutate(lag = as.integer(gsub("lag_", "", lag)))
+
+# --------------------- 7) Heatmaps (opcional) --------------------------------
+p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
+  geom_tile() +
+  scale_fill_viridis_c(name = "Severity (%)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)"),
+    title = paste0("Predicted severity (%) – varying ", var),
+    subtitle = paste0(
+      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
+      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
+      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
+    )
+  ) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))
+
+p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
+  geom_raster() +
+  scale_fill_viridis_c(name = "Δ (pp)") +
+  labs(
+    x = "Lag (days)",
+    y = paste0(var, " (units)")) +
+  theme_bw(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title = element_text(face = "bold"))+
+  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+
+
+# --------------------- 9) Objetos finais -------------------------------------
+# df_sev, df_diff  : long tables
+# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
+# p_heat_abs/diff  : heatmaps
+# p_band_abs/diff  : plots por bandas
+# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
+# P50_var          : cen usado no crosspred para var
+```
+
+```{r}
+
+(p_heat_diff_tmax/p_heat_diff_rain/p_heat_diff_vpd)|(p_tmax/p_rain/p_vpd)
+
+ggsave("fig/delta_severity.png", dpi = 600, width = 10, height = 6)
+
+```
+
+```{r}
+base_vals <- list(
+  tmax     = median(wx_use$tmax, na.rm = TRUE),
+  rain_cum = median(wx_use$rain_cum, na.rm = TRUE),
+  vpd      = median(wx_use$vpd, na.rm = TRUE)
+)
+
+scenA_vals <- base_vals
+scenB_vals <- base_vals
+
+sev_base <- predict_two_window_scenario(
+  fit_sel, dat, cb_templates,
+  base_vals = base_vals,
+  scenA_vals = scenA_vals,
+  scenB_vals = scenB_vals,
+  lags_A = LAG_BAND_A,
+  lags_B = LAG_BAND_B,
+  pop_level = TRUE
+)
+
+earlier <- list(
+  tmax     = 34,
+  rain_cum = 600,          # << cenário testado
+  vpd      = 1.4
+)
+
+later <- list(
+  tmax     = 29,
+  rain_cum = 200,          # << cenário testado
+  vpd      = 0.66
+)
+
+sev_scen <- predict_two_window_scenario(
+  fit_sel, dat, cb_templates,
+  base_vals = base_vals,
+  scenA_vals = earlier,
+  scenB_vals = later,
+  lags_A = LAG_BAND_A,
+  lags_B = LAG_BAND_B,
+  pop_level = TRUE
+)
+
+sev_scen
+
+
+delta <- 100 * (sev_scen - sev_base)
+RR    <- sev_scen / sev_base
+```
+
