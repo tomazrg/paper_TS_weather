@@ -1500,7 +1500,7 @@ sev_tmax_earlier <- calc_curve_phase_tmax(t_grid, band_earlier)
 df_tmax <- data.frame(
   tmax = rep(t_grid, 2),
   sev_pct = c(sev_tmax_earlier, sev_tmax_later),
-  phase = rep(c("Earlier (41–85)", "Later (0–40)"), each = length(t_grid))
+  phase = rep(c("Earlier", "Later"), each = length(t_grid))
 )
 
 
@@ -1722,7 +1722,7 @@ p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
   scale_fill_viridis_c(name = "Δ (pp)") +
   labs(
     x = "Lag (days)",
-    y = paste0(var, " (units)")) +
+    y = " Maximum temperature (°C)") +
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
@@ -2028,7 +2028,7 @@ sev_rain_earlier <- calc_curve_phase_rain(r_grid, band_earlier)
 df_rain <- data.frame(
   rain_cum = rep(r_grid, 2),
   sev_pct = c(sev_rain_earlier, sev_rain_later),
-  phase = rep(c("Earlier (41–85)", "Later (0–40)"), each = length(r_grid))
+  phase = rep(c("Earlier", "Later"), each = length(r_grid))
 )
 
 
@@ -2249,7 +2249,7 @@ p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
   scale_fill_viridis_c(name = "Δ (pp)") +
   labs(
     x = "Lag (days)",
-    y = paste0(var, " (units)")) +
+    y = " Precipitation (mm)") +
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
@@ -2406,6 +2406,18 @@ scale_fill_gradient2(
 
 vpd_movel
 ```
+```{r}
+#tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
+
+tmean_movel+rain_movel+vpd_movel
+
+ggsave("fig/RR_movel.png", dpi = 600, width = 14, height = 6)
+
+#ggsave("fig/RR_movel_severity22.png", dpi = 600, width = 10, height = 6)
+
+#ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
+```
+
 ##### Severity
 
 ```{r}
@@ -2552,7 +2564,7 @@ sev_vpd_earlier <- calc_curve_phase_vpd(v_grid, band_earlier)
 df_vpd <- data.frame(
   vpd = rep(v_grid, 2),
   sev_pct = c(sev_vpd_earlier, sev_vpd_later),
-  phase = rep(c("Earlier (41–85)", "Later (0–40)"), each = length(v_grid))
+  phase = rep(c("Earlier", "Later"), each = length(v_grid))
 )
 
 # ------------------------------------------------------------
@@ -2576,18 +2588,6 @@ sev_vpd = ggplot(df_vpd, aes(vpd, sev_pct, linetype = phase)) +
 sev_vpd
 
 
-```
-
-```{r}
-#tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
-
-tmean_movel+rain_movel+vpd_movel
-
-ggsave("fig/RR_movel.png", dpi = 600, width = 14, height = 6)
-
-#ggsave("fig/RR_movel_severity22.png", dpi = 600, width = 10, height = 6)
-
-#ggsave("fig/RR_movel_severity.png", dpi = 600, width = 12, height = 8)
 ```
 
 ##### Delta
@@ -2790,7 +2790,7 @@ p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)
   scale_fill_viridis_c(name = "Δ (pp)") +
   labs(
     x = "Lag (days)",
-    y = paste0(var, " (units)")) +
+    y = "VPD (kPa)") +
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
@@ -2811,7 +2811,7 @@ p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)
 (p_heat_diff_tmax/p_heat_diff_rain/p_heat_diff_vpd)|(sev_tmax/sev_rain/sev_vpd)
 
 
-ggsave("fig/delta_severity.png", dpi = 600, width = 10, height = 6)
+ggsave("fig/delta_severity.png", dpi = 600, width = 10, height = 8)
 
 ```
 
