@@ -2583,7 +2583,7 @@ sev_vpd
 
 tmean_movel+rain_movel+vpd_movel
 
-ggsave("fig/RR_movel.png", dpi = 600, width = 10, height = 6)
+ggsave("fig/RR_movel.png", dpi = 600, width = 14, height = 6)
 
 #ggsave("fig/RR_movel_severity22.png", dpi = 600, width = 10, height = 6)
 
@@ -4735,5 +4735,239 @@ sev_scen
 
 delta <- 100 * (sev_scen - sev_base)
 RR    <- sev_scen / sev_base
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(dlnm)
+  library(glmmTMB)
+  library(ggplot2)
+})
+
+# =========================
+# PRÉ-REQUISITOS
+# =========================
+stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"), exists("cb_templates"), exists("LAG_MAX"))
+
+# -------------------------
+# Janelas (lags)
+# -------------------------
+LAG_BAND_LATER   <- 0:40          # Later
+LAG_BAND_EARLIER <- 41:LAG_MAX    # Earlier
+N <- LAG_MAX + 1
+
+# -------------------------
+# Baseline (P50) — usado como referência (não para substituir seus cenários)
+# -------------------------
+base_vals <- list(
+  tmax     = as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE)),
+  rain_cum = as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE)),
+  vpd      = as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
+)
+
+# -------------------------
+# Funções auxiliares (cenários por janelas)
+# -------------------------
+lags_to_idx <- function(N, lags) {
+  idx <- N - lags
+  idx[idx >= 1 & idx <= N]
+}
+
+make_profile_two_windows <- function(N, base_value,
+                                     lags_A, value_A,
+                                     lags_B, value_B) {
+  x <- rep(base_value, N)
+  x[lags_to_idx(N, lags_A)] <- value_A
+  x[lags_to_idx(N, lags_B)] <- value_B
+  x
+}
+
+extract_last_cb_row <- function(x, cb_template) {
+  cb <- dlnm::crossbasis(
+    x, lag = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+  as.numeric(cb[length(x), ])
+}
+
+get_cb_colnames <- function(dat, var) {
+  grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
+}
+
+build_newdata_from_profiles <- function(dat, cb_templates, profiles, siteyear_level = NULL) {
+  if (is.null(siteyear_level)) siteyear_level <- dat$siteyear[1]
+  nd <- data.frame(siteyear = siteyear_level)
+
+  for (v in names(profiles)) {
+    cb_row <- extract_last_cb_row(profiles[[v]], cb_templates[[v]])
+    cols   <- get_cb_colnames(dat, v)
+    stopifnot(length(cb_row) == length(cols))
+    nd[cols] <- as.list(cb_row)
+  }
+  nd
+}
+
+predict_two_window_scenario <- function(fit_sel, dat, cb_templates,
+                                        base_vals, scen_later, scen_earlier,
+                                        lags_later = LAG_BAND_LATER,
+                                        lags_earlier = LAG_BAND_EARLIER,
+                                        N = LAG_MAX + 1,
+                                        pop_level = TRUE,
+                                        siteyear_level = NULL) {
+
+  profiles <- list(
+    tmax = make_profile_two_windows(
+      N, base_vals$tmax,
+      lags_later,   scen_later$tmax,
+      lags_earlier, scen_earlier$tmax
+    ),
+    rain_cum = make_profile_two_windows(
+      N, base_vals$rain_cum,
+      lags_later,   scen_later$rain_cum,
+      lags_earlier, scen_earlier$rain_cum
+    ),
+    vpd = make_profile_two_windows(
+      N, base_vals$vpd,
+      lags_later,   scen_later$vpd,
+      lags_earlier, scen_earlier$vpd
+    )
+  )
+
+  nd <- build_newdata_from_profiles(dat, cb_templates, profiles, siteyear_level)
+
+  if (pop_level) {
+    pred <- predict(fit_sel, newdata = nd, type = "response", re.form = NA)
+  } else {
+    pred <- predict(fit_sel, newdata = nd, type = "response")
+  }
+
+  as.numeric(pred) # retorna em (0,1)
+}
+
+# =========================
+# DEFINIÇÕES DOS CENÁRIOS
+# =========================
+# chuva por janela:
+# HH: earlier=400 later=400
+# HB: earlier=400 later=100
+# BH: earlier=100 later=400
+# BB: earlier=100 later=100
+
+rain_scenarios <- tibble::tribble(
+  ~scenario, ~rain_earlier, ~rain_later,
+  "HH",      350,           350,
+  "HL",      350,           150,
+  "LH",      150,           350,
+  "LL",      150,           150
+) %>%
+  mutate(scenario = factor(scenario, levels = c("HH","HL","LH","LL")))
+
+# níveis de VPD (linhas dentro do painel)
+vpd_levels <- tibble::tribble(
+  ~vpd_level, ~vpd_value,
+  "Low",      0.6,
+  "Medium",   1.1,
+  "High",     1.5
+) %>%
+  mutate(vpd_level = factor(vpd_level, levels = c("Low","Medium","High")))
+
+# grid de temperatura
+t_grid <- seq(19, 34, length.out = 800)
+
+# =========================
+# BASELINE SEVERITY (P50/P50/P50)
+# =========================
+sev_base <- predict_two_window_scenario(
+  fit_sel, dat, cb_templates,
+  base_vals = base_vals,
+  scen_later   = list(tmax=base_vals$tmax, rain_cum=base_vals$rain_cum, vpd=base_vals$vpd),
+  scen_earlier = list(tmax=base_vals$tmax, rain_cum=base_vals$rain_cum, vpd=base_vals$vpd),
+  pop_level = TRUE
+)
+sev_base_pct <- 100 * sev_base
+
+# =========================
+# GERAR A GRADE DE PREDIÇÕES
+# =========================
+pred_df <- expand.grid(
+  scenario = levels(rain_scenarios$scenario),
+  vpd_level = levels(vpd_levels$vpd_level),
+  tmax = t_grid,
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+) %>%
+  as_tibble() %>%
+  left_join(rain_scenarios, by = "scenario") %>%
+  left_join(vpd_levels, by = "vpd_level") %>%
+  mutate(
+    scenario = factor(scenario, levels = c("HH","HL","LH","LL")),
+    vpd_level = factor(vpd_level, levels = c("Low","Medium","High"))
+  )
+
+# função para prever 1 linha
+predict_row <- function(tmax_val, rain_earlier, rain_later, vpd_val) {
+
+  scen_later <- list(
+    tmax     = tmax_val,     # tmax aplicado na janela Later
+    rain_cum = rain_later,
+    vpd      = vpd_val
+  )
+
+  scen_earlier <- list(
+    tmax     = tmax_val,     # tmax aplicado na janela Earlier (mesmo valor)
+    rain_cum = rain_earlier,
+    vpd      = vpd_val       # vpd também constante nas duas janelas
+  )
+
+  100 * predict_two_window_scenario(
+    fit_sel, dat, cb_templates,
+    base_vals = base_vals,
+    scen_later = scen_later,
+    scen_earlier = scen_earlier,
+    pop_level = TRUE
+  )
+}
+
+# aplicar previsão para todas as combinações
+pred_df$sev_pct <- purrr::pmap_dbl(
+  list(pred_df$tmax, pred_df$rain_earlier, pred_df$rain_later, pred_df$vpd_value),
+  predict_row
+)
+
+# =========================
+# PLOT 2×2 (facet) + 3 linhas (VPD)
+# =========================
+p <- pred_df %>%
+  filter(!vpd_level == "Low") %>% 
+  ggplot(aes(x = tmax, y = sev_pct, color = vpd_level)) +
+geom_smooth(method = "gam",
+              formula = y ~ s(x, bs = "cs", k = 2),
+              se = FALSE,
+              linewidth = 2) +
+
+  facet_wrap(~ scenario, ncol = 2) +
+  scale_color_manual(
+    values = c("Low" = "#1b9e77", "Medium" = "green4", "High" = "#B2182B"),
+    name = "VPD level") +
+  labs(
+    x = "Maximum temperature (°C)",
+    y = "Severity (%)") +
+  theme_bw(base_size = 12) +
+  theme(
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold"),
+    legend.title = element_text(face = "bold"),
+    strip.background = element_blank())+
+  coord_cartesian(ylim = c(0, 100))+
+  scale_x_continuous(breaks=c(19,21,23,25,27,29,31,33,35), limits = c(19,35))
+
+print(p)
+
+ggsave("fig/severity_scenarios.png", dpi = 600, width = 8, height = 6)
 ```
 
