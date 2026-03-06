@@ -811,7 +811,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 31.5, linetype=2) +
   geom_vline(xintercept = 32.5, linetype=2) +
-  geom_smooth(size = 3, colour = "#B2182B") +
+  geom_smooth(size = 3, colour = "#B2182B", se = F) +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
   theme_bw()+
@@ -882,7 +882,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 32, linetype=2) +
   geom_vline(xintercept = 34, linetype=2) +
-  geom_smooth(size = 3, colour = "#B2182B") +
+  geom_smooth(size = 3, colour = "#B2182B", se  = F) +
   labs(x="Temperature (°C)",
        y="Relative risk (%)") +
   theme_bw()+
@@ -959,7 +959,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 300, linetype=2) +
   geom_vline(xintercept = 600, linetype=2) +
-  geom_smooth(size = 3, colour = "#2166AC") +
+  geom_smooth(size = 3, colour = "#2166AC", se = F) +
   labs(x="Precipitation (mm)",
        y="") +
   theme_bw()+
@@ -1031,7 +1031,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 200, linetype=2) +
   geom_vline(xintercept = 350, linetype=2) +
-  geom_smooth(size = 3, colour = "#2166AC") +
+  geom_smooth(size = 3, colour = "#2166AC", SE = ) +
   labs(x="Precipitation (mm)",
        y="") +
   theme_bw()+
@@ -1109,7 +1109,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 1.3, linetype=2) +
   geom_vline(xintercept = 1.5, linetype=2) +
-  geom_smooth(size = 3, colour = "green4") +
+  geom_smooth(size = 3, colour = "green4", se = F) +
   labs(x="VPD (kPa)",
        y="") +
   facet_wrap(~phase, strip.position = "right")+
@@ -1187,7 +1187,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 0.66, linetype=2) +
   geom_vline(xintercept = 0.80, linetype=2) +
-  geom_smooth(size = 3, colour = "green4") +
+  geom_smooth(size = 3, colour = "green4", se = F) +
   labs(x="Precipitation (mm)",
        y="") +
     facet_wrap(~phase, strip.position = "right")+
@@ -1209,7 +1209,7 @@ library(patchwork)
 tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
 
 
-ggsave("fig/RR1.png", dpi = 600, width = 12, height = 6)
+ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
 ```
 
 ### Lag movel
