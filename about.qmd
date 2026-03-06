@@ -1296,6 +1296,25 @@ df_heat <- df_heat %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
 ```
+```{r}
+freq_tmax = df_heat %>% 
+  ggplot(aes(PERC))+
+  geom_histogram(bins = 15, color = "white", fill = "#B2182B")+
+  theme_bw(base_size = 12) +
+    theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.position = "top"
+  )+
+  labs(
+    x = "Relative risk (RR)",
+    y = "Frequency"
+  )
+```
 
 ```{r}
 library(ggplot2)
@@ -1828,6 +1847,27 @@ df_heat <- df_heat %>%
 ```
 
 ```{r}
+freq_rain = df_heat %>% 
+  ggplot(aes(PERC))+
+  geom_histogram(bins = 15, color = "white", fill = "#2166AC")+
+  theme_bw(base_size = 12) +
+    theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.position = "top"
+  )+
+  labs(
+    x = "Relative risk (RR)",
+    y = "Frequency"
+  )
+
+freq_rain
+```
+```{r}
 library(ggplot2)
 library(dplyr)
 library(scales)
@@ -2353,6 +2393,28 @@ df_heat <- df_heat %>%
 ```
 
 ```{r}
+freq_vpd = df_heat %>% 
+  ggplot(aes(PERC))+
+  geom_histogram(bins = 15, color = "white", fill = "green4")+
+  theme_bw(base_size = 12) +
+    theme(
+    panel.grid = element_blank(),
+    axis.title = element_text(face = "bold", size = 12),
+    axis.text  = element_text(size = 10),
+    legend.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(size = 10),
+    legend.position = "top"
+  )+
+  labs(
+    x = "Relative risk (RR)",
+    y = "Frequency"
+  )
+
+freq_vpd
+```
+
+```{r}
 library(ggplot2)
 library(dplyr)
 library(scales)
@@ -2409,9 +2471,9 @@ vpd_movel
 ```{r}
 #tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
 
-tmean_movel+rain_movel+vpd_movel
+(tmean_movel+rain_movel+vpd_movel)/(freq_tmax+freq_rain+freq_vpd)
 
-ggsave("fig/RR_movel.png", dpi = 600, width = 14, height = 6)
+ggsave("fig/RR_movel.png", dpi = 600, width = 10, height = 6)
 
 #ggsave("fig/RR_movel_severity22.png", dpi = 600, width = 10, height = 6)
 
