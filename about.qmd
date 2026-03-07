@@ -568,9 +568,9 @@ $$
 
 ```{r}
 
-CCC  <- 0.89
-Bias <- 0.94
-Precision <- 0.94
+CCC  <- 0.75
+Bias <- 0.90
+Precision <- 0.82
 
 library(scales)
 lab <- paste0(
@@ -1296,10 +1296,14 @@ df_heat <- df_heat %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
 ```
+
+
 ```{r}
+
+
 freq_tmax = df_heat %>% 
   ggplot(aes(PERC))+
-  geom_histogram(bins = 15, color = "white", fill = "#B2182B")+
+  geom_histogram(bins = 12, color = "white", fill = "#B2182B")+
   theme_bw(base_size = 12) +
     theme(
     panel.grid = element_blank(),
@@ -1314,6 +1318,8 @@ freq_tmax = df_heat %>%
     x = "Relative risk (RR)",
     y = "Frequency"
   )
+
+freq_tmax
 ```
 
 ```{r}
@@ -1347,7 +1353,7 @@ scale_fill_gradient2(
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(6, "cm"),  # << AQUI você estica
+    barwidth  = unit(4, "cm"),  # << AQUI você estica
     barheight = unit(0.5, "cm")  # espessura da barra
   )
 )+
@@ -1525,7 +1531,11 @@ df_tmax <- data.frame(
 
 sev_tmax = ggplot(df_tmax, aes(tmax, sev_pct, linetype = phase)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, color = "#B2182B") +
+  #geom_smooth(size = 2, se = F, color = "#B2182B") +
+   geom_smooth(method = "gam",
+              formula = y ~ s(x, bs = "cs", k = 2),
+              se = FALSE,
+              linewidth = 2, colour = "#B2182B")+
   #scale_color_brewer(palette = "Dark2") +
   labs(
     x = "Temperature (°C)",
@@ -1535,13 +1545,22 @@ sev_tmax = ggplot(df_tmax, aes(tmax, sev_pct, linetype = phase)) +
   theme(
     legend.title = element_text(face = "bold"),
     axis.title = element_text(face = "bold", size = 12),
-    axis.text  = element_text(size = 10))
+    axis.text  = element_text(size = 10))+
+  scale_x_continuous(
+    limits = c(19, 34),
+    breaks = seq(19, 34, by = 3),
+    expand = c(0, 0))+
+   scale_y_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, by = 25),
+    expand = c(0, 0))
 
 
 sev_tmax
 
 ```
 ##### Delta
+
 ```{r}
 # ==============================================================
 # DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
@@ -1572,28 +1591,33 @@ suppressPackageStartupMessages({
 stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
 
 # --------------------- 1) Parâmetros --------------------------
-var <- "tmax"   # variável-alvo (tmax | rain_cum | vpd)
+var <- "tmax"  # tmax | rain_cum | vpd
 
 if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
 if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
   stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
 }
 
-# Faixa do heatmap (ajuste aqui)
 x_all <- wx_use[[var]]
 if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
 
 # "cen" do DLNM: P50 da variável-alvo
 P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
-# aparar faixa ao intervalo observado para evitar extrapolação
-grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
-at_vals  <- seq(19, 34, length.out = 1000)  # <<< ajuste livre #29,34
-at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
-if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+# --------------------------------------------------------------
+# ✅ IMPORTANTE: NÃO cortar pelo P05–P95 se você quer 19–34
+# --------------------------------------------------------------
+at_vals <- seq(19, 34, length.out = 1000)  # força o intervalo desejado
+
+# (opcional) Aviso se houver extrapolação fora do range observado
+rng_obs <- range(x_all, na.rm = TRUE)
+if (min(at_vals) < rng_obs[1] || max(at_vals) > rng_obs[2]) {
+  message("ATENÇÃO: at_vals inclui valores fora do range observado: ",
+          "range observado = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
+}
 
 # Lags para plot
-lag_max_plot <- 85L                 # <<< ajuste livre
+lag_max_plot <- 85L
 lag_max_plot <- min(lag_max_plot, LAG_MAX)
 
 # --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
@@ -1643,8 +1667,7 @@ keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf <- mf[, keep, drop = FALSE]
 lag_idx <- lag_idx[keep]
 
-# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
-# Referências (P50) para TODAS as variáveis do modelo
+# --------------------- 4) Baseline coerente (cenário conjunto P50) ------------
 P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
 P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
 P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
@@ -1657,15 +1680,16 @@ n_ref <- wx_use %>%
   stats::median() %>%
   as.integer()
 
+n_ref <- max(n_ref, LAG_MAX + 1)
+
 # nomes cb_* no dat
 nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
 nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
 nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
-
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
 # função: última linha do crossbasis para série constante
-last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
+last_cb_row_const <- function(value, cb_template, LAG_MAX, n_ref) {
   x <- rep(value, n_ref)
   cbx <- dlnm::crossbasis(
     x, lag = LAG_MAX,
@@ -1675,42 +1699,26 @@ last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
   as.numeric(cbx[n_ref, ])
 }
 
-# cb "última linha" no cenário de referência
-bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
-br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
-bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
+bt0 <- last_cb_row_const(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
+br0 <- last_cb_row_const(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
+bv0 <- last_cb_row_const(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
 
-# newdata referência (1 linha)
-nd0 <- data.frame(siteyear = NA)
+# newdata referência
+nd0 <- data.frame(siteyear = dat$siteyear[1])  # precisa ter um level válido
 nd0[nm_t] <- as.list(bt0)
 nd0[nm_r] <- as.list(br0)
 nd0[nm_v] <- as.list(bv0)
 
-# baseline pop-level (efeitos aleatórios zerados)
 sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
 
 # --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
 mf_cum <- t(apply(mf, 1, cumsum))
 
-SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
-SEVpct_mat <- 100 * SEV_mat                       # 0–100
+SEV_mat <- plogis(qlogis(sev_base) + mf_cum)   # 0–1
+SEVdiff_pp <- 100 * (SEV_mat - sev_base)       # pontos percentuais (pp)
 
-# (opcional) diferença absoluta vs baseline (em pontos percentuais)
-SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
-
-# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
-OR_mat <- exp(mf_cum)
-
-# --------------------- 6) Data frames long (heatmap) -------------------------
-df_sev <- as.data.frame(SEVpct_mat)
-colnames(df_sev) <- paste0("lag_", lag_idx)
-
-df_sev <- df_sev %>%
-  mutate(var_val = at_vals) %>%
-  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_pct") %>%
-  mutate(lag = as.integer(gsub("lag_", "", lag)))
-
-df_diff <- as.data.frame(SEVdiffpct_mat)
+# --------------------- 6) Data frame long (heatmap) ---------------------------
+df_diff <- as.data.frame(100 * (SEV_mat - sev_base))
 colnames(df_diff) <- paste0("lag_", lag_idx)
 
 df_diff <- df_diff %>%
@@ -1718,49 +1726,31 @@ df_diff <- df_diff %>%
   pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
-# --------------------- 7) Heatmaps (opcional) --------------------------------
-p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
-  geom_tile() +
-  scale_fill_viridis_c(name = "Severity (%)") +
-  labs(
-    x = "Lag (days)",
-    y = paste0(var, " (units)"),
-    title = paste0("Predicted severity (%) – varying ", var),
-    subtitle = paste0(
-      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
-      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
-      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
-    )
-  ) +
-  theme_bw(base_size = 12) +
-  theme(plot.title = element_text(face = "bold"),
-        axis.title = element_text(face = "bold"))
-
+# --------------------- 7) Heatmap (Δ em pp) ----------------------------------
 p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
   geom_raster() +
   scale_fill_viridis_c(name = "Δ (pp)") +
   labs(
     x = "Lag (days)",
-    y = " Maximum temperature (°C)") +
+    y = " Temperature (°C)") +
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
-  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+  scale_x_continuous(
+    breaks = c(0,10,20,30,40,50,60,70,80),
+    limits = c(0,80),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(19, 34),
+    breaks = seq(19, 35, by = 3),
+    expand = c(0, 0))
 
-print(p_heat_abs)
-print(p_heat_diff)
+print(p_heat_diff_tmax)
 
-
-# --------------------- 9) Objetos finais -------------------------------------
-# df_sev, df_diff  : long tables
-# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
-# p_heat_abs/diff  : heatmaps
-# p_band_abs/diff  : plots por bandas
-# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
-# P50_var          : cen usado no crosspred para var
-
-min(df_sev)
 ```
+
+
 #### Precipitation
 
 ```{r}
@@ -1849,7 +1839,7 @@ df_heat <- df_heat %>%
 ```{r}
 freq_rain = df_heat %>% 
   ggplot(aes(PERC))+
-  geom_histogram(bins = 15, color = "white", fill = "#2166AC")+
+  geom_histogram(bins = 12, color = "white", fill = "#2166AC")+
   theme_bw(base_size = 12) +
     theme(
     panel.grid = element_blank(),
@@ -1896,7 +1886,7 @@ scale_fill_gradient2(
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(6, "cm"),  # << AQUI você estica
+    barwidth  = unit(4, "cm"),  # << AQUI você estica
     barheight = unit(0.5, "cm")  # espessura da barra
   )
 )+
@@ -1915,8 +1905,11 @@ scale_fill_gradient2(
     legend.title = element_text(face = "bold"),
     plot.title = element_text(face = "bold", size = 13),
     plot.subtitle = element_text(size = 10),
-    legend.position = "top"
-  )
+    legend.position = "top")+
+  scale_y_continuous(
+    limits = c(0, 600),
+    breaks = seq(0, 600, by = 100),
+    expand = c(0, 0))
 
 rain_movel
 
@@ -2074,7 +2067,11 @@ df_rain <- data.frame(
 
 sev_rain = ggplot(df_rain, aes(rain_cum, sev_pct, linetype = phase)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, colour = "#2166AC") +
+  #geom_smooth(size = 2, se = F, colour = "#2166AC") +
+  geom_smooth(method = "gam",
+              formula = y ~ s(x, bs = "cs", k = 2),
+              se = FALSE,
+              linewidth = 2, colour = "#2166AC")+
   #scale_color_brewer(palette = "Dark2") +
   labs(
     x = "Precipitation (mm)",
@@ -2084,7 +2081,15 @@ sev_rain = ggplot(df_rain, aes(rain_cum, sev_pct, linetype = phase)) +
   theme(
     legend.title = element_text(face = "bold"),
     axis.title = element_text(face = "bold", size = 12),
-    axis.text  = element_text(size = 10))
+    axis.text  = element_text(size = 10))+
+  scale_x_continuous(
+    limits = c(0, 600),
+    breaks = seq(0, 600, by = 100),
+    expand = c(0, 0))+
+   scale_y_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, by = 25),
+    expand = c(0, 0))
 
 sev_rain
 
@@ -2266,23 +2271,6 @@ df_diff <- df_diff %>%
   pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
-# --------------------- 7) Heatmaps (opcional) --------------------------------
-p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
-  geom_tile() +
-  scale_fill_viridis_c(name = "Severity (%)") +
-  labs(
-    x = "Lag (days)",
-    y = paste0(var, " (units)"),
-    title = paste0("Predicted severity (%) – varying ", var),
-    subtitle = paste0(
-      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
-      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
-      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
-    )
-  ) +
-  theme_bw(base_size = 12) +
-  theme(plot.title = element_text(face = "bold"),
-        axis.title = element_text(face = "bold"))
 
 p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
   geom_raster() +
@@ -2293,21 +2281,18 @@ p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
-  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+  scale_x_continuous(
+    breaks = c(0,10,20,30,40,50,60,70,80),
+    limits = c(0,80),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 600),
+    breaks = seq(0, 600, by = 100),
+    expand = c(0, 0))
 
-print(p_heat_abs)
-print(p_heat_diff)
+print(p_heat_diff_rain)
 
-
-# --------------------- 9) Objetos finais -------------------------------------
-# df_sev, df_diff  : long tables
-# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
-# p_heat_abs/diff  : heatmaps
-# p_band_abs/diff  : plots por bandas
-# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
-# P50_var          : cen usado no crosspred para var
-
-min(df_sev)
 ```
 #### VPD
 
@@ -2395,7 +2380,7 @@ df_heat <- df_heat %>%
 ```{r}
 freq_vpd = df_heat %>% 
   ggplot(aes(PERC))+
-  geom_histogram(bins = 15, color = "white", fill = "green4")+
+  geom_histogram(bins = 12, color = "white", fill = "green4")+
   theme_bw(base_size = 12) +
     theme(
     panel.grid = element_blank(),
@@ -2444,7 +2429,7 @@ scale_fill_gradient2(
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(6, "cm"),  # << AQUI você estica
+    barwidth  = unit(4, "cm"),  # << AQUI você estica
     barheight = unit(0.5, "cm")  # espessura da barra
   )
 ) +
@@ -2590,7 +2575,7 @@ sev_base_pct <- 100 * base["mu"]
 # ------------------------------------------------------------
 # 5) GRID DE VPD
 # ------------------------------------------------------------
-v_grid <- seq(0.66, 2.0, length.out = 200)
+v_grid <- seq(0, 2.0, length.out = 200)
 
 # janelas
 band_later   <- 0:40      # Later
@@ -2635,7 +2620,10 @@ df_vpd <- data.frame(
 
 sev_vpd = ggplot(df_vpd, aes(vpd, sev_pct, linetype = phase)) +
   #geom_hline(yintercept = 100*sev_base, linetype = 2, alpha = 0.6) +
-  geom_smooth(size = 2, se = F, colour = "green4") +
+  geom_smooth(method = "gam",
+              formula = y ~ s(x, bs = "cs", k = 2),
+              se = FALSE,
+              linewidth = 2, colour = "green4")+
   #scale_color_brewer(palette = "Dark2") +
   labs(
     x = "VPD (kPa)",
@@ -2645,7 +2633,15 @@ sev_vpd = ggplot(df_vpd, aes(vpd, sev_pct, linetype = phase)) +
   theme(
     legend.title = element_text(face = "bold"),
     axis.title = element_text(face = "bold", size = 12),
-    axis.text  = element_text(size = 10))
+    axis.text  = element_text(size = 10))+
+  scale_x_continuous(
+    limits = c(0.5, 2),
+    breaks = seq(0.5, 2, by = 0.25),
+    expand = c(0, 0))+
+   scale_y_continuous(
+    limits = c(50, 100),
+    breaks = seq(0, 100, by = 25),
+    expand = c(0, 0))
 
 sev_vpd
 
@@ -2653,6 +2649,7 @@ sev_vpd
 ```
 
 ##### Delta
+
 ```{r}
 # ==============================================================
 # DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
@@ -2680,34 +2677,41 @@ suppressPackageStartupMessages({
 })
 
 # --------------------- 0) Checagens ---------------------------
-stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
+stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"),
+          exists("wx_use"), exists("LAG_MAX"))
 
 # --------------------- 1) Parâmetros --------------------------
-var <- "vpd"   # variável-alvo (tmax | rain_cum | vpd)
+var <- "vpd"   # alvo fixo aqui
 
 if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
 if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
   stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
 }
 
-# Faixa do heatmap (ajuste aqui)
 x_all <- wx_use[[var]]
 if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
 
 # "cen" do DLNM: P50 da variável-alvo
 P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
-# aparar faixa ao intervalo observado para evitar extrapolação
-grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
-at_vals  <- seq(0.66, 2, length.out = 1000)  # <<< ajuste livre #29,34
-at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
-if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+# --------------------------------------------------------------
+# ✅ IMPORTANTE: manter intervalo completo 0.66–2.0
+# (sem cortar por P05–P95)
+# --------------------------------------------------------------
+at_vals <- seq(0.50, 2.0, length.out = 1000)
+
+# (opcional) aviso se houver extrapolação fora do range observado
+rng_obs <- range(x_all, na.rm = TRUE)
+if (min(at_vals) < rng_obs[1] || max(at_vals) > rng_obs[2]) {
+  message("ATENÇÃO: at_vals inclui valores fora do range observado: ",
+          "range observado = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
+}
 
 # Lags para plot
-lag_max_plot <- 85L                 # <<< ajuste livre
+lag_max_plot <- 85L
 lag_max_plot <- min(lag_max_plot, LAG_MAX)
 
-# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+# --------------------- 2) Coefs/VCOV apenas do bloco cb_vpd ------------------
 cb <- cb_templates[[var]]
 
 cf_all <- coef(summary(fit_sel))$cond[, 1]
@@ -2754,8 +2758,7 @@ keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf <- mf[, keep, drop = FALSE]
 lag_idx <- lag_idx[keep]
 
-# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
-# Referências (P50) para TODAS as variáveis do modelo
+# --------------------- 4) Baseline coerente (cenário conjunto P50) ------------
 P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
 P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
 P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
@@ -2768,15 +2771,16 @@ n_ref <- wx_use %>%
   stats::median() %>%
   as.integer()
 
+n_ref <- max(n_ref, LAG_MAX + 1)
+
 # nomes cb_* no dat
 nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
 nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
 nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
-
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
-# função: última linha do crossbasis para série constante
-last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
+# última linha do crossbasis para série constante
+last_cb_row_const <- function(value, cb_template, LAG_MAX, n_ref) {
   x <- rep(value, n_ref)
   cbx <- dlnm::crossbasis(
     x, lag = LAG_MAX,
@@ -2786,13 +2790,12 @@ last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
   as.numeric(cbx[n_ref, ])
 }
 
-# cb "última linha" no cenário de referência
-bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
-br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
-bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
+bt0 <- last_cb_row_const(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
+br0 <- last_cb_row_const(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
+bv0 <- last_cb_row_const(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
 
-# newdata referência (1 linha)
-nd0 <- data.frame(siteyear = NA)
+# newdata referência (1 linha) — use level válido
+nd0 <- data.frame(siteyear = dat$siteyear[1])
 nd0[nm_t] <- as.list(bt0)
 nd0[nm_r] <- as.list(br0)
 nd0[nm_v] <- as.list(bv0)
@@ -2803,25 +2806,11 @@ sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.for
 # --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
 mf_cum <- t(apply(mf, 1, cumsum))
 
-SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
-SEVpct_mat <- 100 * SEV_mat                       # 0–100
+SEV_mat <- plogis(qlogis(sev_base) + mf_cum)         # 0–1
+SEVdiff_pp <- 100 * (SEV_mat - sev_base)             # pontos percentuais (pp)
 
-# (opcional) diferença absoluta vs baseline (em pontos percentuais)
-SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
-
-# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
-OR_mat <- exp(mf_cum)
-
-# --------------------- 6) Data frames long (heatmap) -------------------------
-df_sev <- as.data.frame(SEVpct_mat)
-colnames(df_sev) <- paste0("lag_", lag_idx)
-
-df_sev <- df_sev %>%
-  mutate(var_val = at_vals) %>%
-  pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_pct") %>%
-  mutate(lag = as.integer(gsub("lag_", "", lag)))
-
-df_diff <- as.data.frame(SEVdiffpct_mat)
+# --------------------- 6) Data frame long (heatmap Δpp) -----------------------
+df_diff <- as.data.frame(SEVdiff_pp)
 colnames(df_diff) <- paste0("lag_", lag_idx)
 
 df_diff <- df_diff %>%
@@ -2829,24 +2818,7 @@ df_diff <- df_diff %>%
   pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
-# --------------------- 7) Heatmaps (opcional) --------------------------------
-p_heat_abs <- ggplot(df_sev, aes(x = lag, y = var_val, fill = SEV_pct)) +
-  geom_tile() +
-  scale_fill_viridis_c(name = "Severity (%)") +
-  labs(
-    x = "Lag (days)",
-    y = paste0(var, " (units)"),
-    title = paste0("Predicted severity (%) – varying ", var),
-    subtitle = paste0(
-      "Baseline(ref) = ", round(100 * sev_base, 2), "%; ",
-      "cen(P50_", var, ") = ", round(P50_var, 2), "; ",
-      "ref: tmax=", round(P50_t,2), ", rain=", round(P50_r,2), ", vpd=", round(P50_v,2)
-    )
-  ) +
-  theme_bw(base_size = 12) +
-  theme(plot.title = element_text(face = "bold"),
-        axis.title = element_text(face = "bold"))
-
+# --------------------- 7) Heatmap (Δ em pp) ----------------------------------
 p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
   geom_raster() +
   scale_fill_viridis_c(name = "Δ (pp)") +
@@ -2856,16 +2828,17 @@ p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)
   theme_bw(base_size = 12) +
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
-  scale_x_continuous(breaks=c(0,10,20,30,40,50,60,70,80), limits = c(0,80))
+  scale_x_continuous(
+    breaks = c(0,10,20,30,40,50,60,70,80),
+    limits = c(0,80),
+    expand = c(0, 0)
+  ) +
+  scale_y_continuous(
+    limits = c(0.5, 2),
+    breaks = seq(0.5, 2, by = 0.25),
+    expand = c(0, 0))
 
-
-# --------------------- 9) Objetos finais -------------------------------------
-# df_sev, df_diff  : long tables
-# band_df          : curvas (SEV_pct, SEV_diff_pp, OR)
-# p_heat_abs/diff  : heatmaps
-# p_band_abs/diff  : plots por bandas
-# sev_base         : baseline (0–1) no cenário ref (P50 de todas)
-# P50_var          : cen usado no crosspred para var
+print(p_heat_diff_vpd)
 ```
 
 ```{r}
@@ -4134,13 +4107,15 @@ results_df %>%
   )
 
 
-results_df %>% 
-  filter(CCC1 >= 0.8) %>% 
+results_df2 %>% 
+  filter(CCC1 >= 0.80) %>% 
   filter(str_detect(vars, "\\brain_cum\\b")) |>
   mutate(
     n_vars = str_count(vars, "\\+") + 1
   ) |>
   filter(n_vars <= 4)
+
+results_df2 = read_xlsx("data/results_df2.xlsx")
 ```
 
 # Severity (weather movel)
@@ -5026,7 +5001,10 @@ geom_smooth(method = "gam",
     legend.title = element_text(face = "bold"),
     strip.background = element_blank())+
   coord_cartesian(ylim = c(0, 100))+
-  scale_x_continuous(breaks=c(19,21,23,25,27,29,31,33,35), limits = c(19,35))
+  scale_x_continuous(
+    limits = c(19, 34),
+    breaks = seq(19, 34, by = 3),
+    expand = c(0.02, 0.02))
 
 print(p)
 
