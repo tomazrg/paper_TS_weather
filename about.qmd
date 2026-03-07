@@ -1022,7 +1022,7 @@ rr_sum_r_ea <- data.frame(
 
 rain_RR_first = rr_sum_r_ea %>% 
   #filter(tmean >=25) %>% 
- filter(tmean >=5) %>% 
+ dplyr::filter(tmean >=5) %>% 
  #filter(tmean >=0.66) %>%
 ggplot(aes(x=tmean, y=PERC)) +
   ##annotate("rect", xmin = 5, xmax = 10, ymin = -Inf, ymax = Inf,
@@ -1031,7 +1031,7 @@ ggplot(aes(x=tmean, y=PERC)) +
   geom_hline(yintercept = 0, linetype=2) +
   geom_vline(xintercept = 200, linetype=2) +
   geom_vline(xintercept = 350, linetype=2) +
-  geom_smooth(size = 3, colour = "#2166AC", SE = ) +
+  geom_smooth(size = 3, colour = "#2166AC", se = F) +
   labs(x="Precipitation (mm)",
        y="") +
   theme_bw()+
