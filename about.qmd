@@ -4514,6 +4514,7 @@ wx_use2 %>%
   ) %>% 
   filter(state.x == "TO")
 
+wx_use2$year.x = wx_use2$year.x-1
 ```
 
 ```{r}
@@ -4554,7 +4555,7 @@ tmax_state = wx_use2 %>%
     strip.text = element_text(size = 14, face = "bold")
   )+
   labs(x = "DPP",
-       y = "Maximum temperature (°C)",
+       y = "Temperature (°C)",
        color = "")
 
 tmax_state
@@ -4577,19 +4578,11 @@ rain_state = wx_use2 %>%
     strip.text = element_text(size = 14, face = "bold")
   )+
   labs(x = "DPP",
-       y = "Accumulated rainfall (mm)",
+       y = "Precipitation (mm)",
        color = "")
 rain_state
 
 ggsave("fig/rain_state.png", dpi = 600, width = 14, height = 10)
-```
-
-
-```{r}
-library(patchwork)
-tmax_state+rain_state+vpd_state
-
-ggsave("fig/dpp_state.png", dpi = 600, width = 14, height = 10)
 ```
 
 # Map
