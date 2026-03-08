@@ -1738,7 +1738,7 @@ p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
     breaks = c(0,10,20,30,40,50,60,70,80),
-    limits = c(0,80),
+    limits = c(0,85),
     expand = c(0, 0)
   ) +
   scale_y_continuous(
@@ -2283,7 +2283,7 @@ p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
     breaks = c(0,10,20,30,40,50,60,70,80),
-    limits = c(0,80),
+    limits = c(0,85),
     expand = c(0, 0)
   ) +
   scale_y_continuous(
@@ -2830,7 +2830,7 @@ p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
     breaks = c(0,10,20,30,40,50,60,70,80),
-    limits = c(0,80),
+    limits = c(0,85),
     expand = c(0, 0)
   ) +
   scale_y_continuous(
@@ -3188,6 +3188,8 @@ ggplot(aes(x = as.factor(year), y = delta_RR)) +
 
 ggsave("fig/marginal_year.png", dpi = 600, bg = "white", height = 8, width = 6)
 ```
+
+
 ```{r}
 summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
   phase <- match.arg(phase)
@@ -3800,6 +3802,22 @@ ggplot(aes(days_difference)) +
   theme_bw()+
   theme(text = element_text(size = 10),
         axis.title = element_text(face = "bold", size = 12))
+```
+
+```{r}
+weather_data %>% 
+  summarise(
+    mean = mean(days_difference, na.rm = T),
+    sd = sd(days_difference, na.rm = T),
+    min = min(days_difference, na.rm = T),
+    max = max(days_difference, na.rm = T),
+    min_lat = min(latitude),
+    max_lat = max(latitude),
+    sd_lat = sd(latitude),
+    min_lon = min(longitude),
+    max_lon = max(longitude),
+    sd_lon = sd(longitude)
+  )
 ```
 
 ```{r}
@@ -4984,7 +5002,7 @@ geom_smooth(method = "gam",
     values = c("Low" = "#1b9e77", "Medium" = "green4", "High" = "#B2182B"),
     name = "VPD level") +
   labs(
-    x = "Maximum temperature (°C)",
+    x = "Temperature (°C)",
     y = "Severity (%)") +
   theme_bw(base_size = 12) +
   theme(
