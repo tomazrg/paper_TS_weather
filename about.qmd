@@ -5023,11 +5023,4 @@ print(p)
 ggsave("fig/severity_scenarios.png", dpi = 600, width = 8, height = 6)
 ```
 
-```{r}
-osmar = read_xlsx("data/osmar.xlsx")
-
-osmar %>% 
-  ggplot(aes(Galhas.g, Ovos.g))+
-  geom_point()
-```
 
