@@ -3516,6 +3516,9 @@ plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
 
 plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="horizontal")
 ```
+
+
+
 ```{r}
 # severidade média por ano (ajuste o nome da coluna de resposta)
 sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
@@ -5464,6 +5467,7 @@ p <- ggplot(
 
 print(p)
 
+ggsave("fig/tmax.png", dpi = 600)
 ```
 
 
