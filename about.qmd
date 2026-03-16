@@ -5341,94 +5341,129 @@ summary(tmax_mean_grid$tmax_mean)
 # =========================================================
 # 2) MAPA COM PIXELS CONTÍNUOS (grid regular 0.1 x 0.1)
 # =========================================================
+
 p <- ggplot(
   tmax_mean_grid,
   aes(x = longitude, y = latitude, fill = tmax_mean)
 ) +
   geom_raster(interpolate = FALSE) +
   coord_equal(expand = FALSE) +
-  scale_fill_viridis_c(
-    option = "C",
-    name   = expression(T[max]~"média (°C)"),
-    labels = label_number(accuracy = 0.1)
-  ) +
+ scale_fill_distiller(
+  palette = "OrRd",
+  direction = 1,
+  name = expression(T[max]~"média (°C)")
+) +
   labs(
     x = "Longitude",
     y = "Latitude",
     title = "Temperatura máxima média (janela PD85)"
   ) +
-  theme_minimal(base_size = 12) +
+  theme_bw() +
   theme(plot.title = element_text(hjust = 0.5))
 
 print(p)
 
-# =========================================================
-# 3) (OPCIONAL) SALVAR FIGURA
-# =========================================================
-# ggsave(
-#   filename = "tmax_mean_PD85_map.png",
-#   plot     = p,
-#   width    = 8,
-#   height   = 6,
-#   dpi      = 300
-# )
-
 ```
+
+
 ```{r}
 # =========================================================
 # 0) Pacotes
 # =========================================================
 library(dplyr)
+library(sf)
+library(geobr)
 library(ggplot2)
 
 # =========================================================
-# 1) Checagem mínima do banco
+# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
+#    >>> Edite esta linha <<<
 # =========================================================
-# Espera-se que p_states tenha:
-# longitude, latitude
+states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
+# Exemplo acima — troque pelas suas UFs
 
-stopifnot(all(c("longitude", "latitude") %in% names(p_states)))
-
-# Remover possíveis NAs (boa prática)
-pts_plot <- p_states %>%
-  filter(!is.na(longitude), !is.na(latitude))
+# --- ALTERNATIVA (se preferir remover em vez de manter):
+# states_remove <- c("PA","TO","MA","PI","CE","BA")
+# (aí, mais abaixo, use !%in% em vez de %in%)
 
 # =========================================================
-# 2) Plotar pontos no mapa
+# 2) Ler estados (geobr) e garantir CRS
+# =========================================================
+br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
+  st_transform(4326)
+
+# Filtrar SOMENTE os estados desejados
+br_states_use <- br_states %>%
+  filter(abbrev_state %in% states_keep)
+
+# --- ALTERNATIVA (se estiver usando states_remove):
+# br_states_use <- br_states %>%
+#   filter(!abbrev_state %in% states_remove)
+
+# Polígono máscara (dissolve)
+mask_states <- st_union(br_states_use)
+
+# =========================================================
+# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
+#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# =========================================================
+tmax_mean_grid_clean <- tmax_mean_grid %>%
+  filter(
+    !is.na(longitude),
+    !is.na(latitude),
+    !is.na(tmax_mean)
+  )
+
+# Converter pixels (lon/lat) para sf
+grid_sf <- st_as_sf(
+  tmax_mean_grid_clean,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+)
+
+# =========================================================
+# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
+# =========================================================
+grid_sf_clip <- st_filter(grid_sf, mask_states)
+
+tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
+
+# =========================================================
+# 5) Plot final (somente estados escolhidos)
 # =========================================================
 p <- ggplot(
-  pts_plot,
-  aes(x = longitude, y = latitude)
+  tmax_mean_grid_clip,
+  aes(x = longitude, y = latitude, fill = tmax_mean)
 ) +
-  geom_point(
-    color = "red",
-    size  = 0.8,
-    alpha = 0.6
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.3,
+    inherit.aes = FALSE
   ) +
-  coord_equal(expand = FALSE) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "OrRd",
+    direction = 1,
+    name = expression(T[max]~"média (°C)")
+  ) +
   labs(
     x = "Longitude",
     y = "Latitude",
-    title = "Distribuição espacial dos pontos (p_states)"
+    title = "Temperatura máxima média (janela PD85) — estados selecionados"
   ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(hjust = 0.5)
-  )
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
 
 print(p)
 
-# =========================================================
-# 3) (Opcional) Salvar figura
-# =========================================================
-# ggsave(
-#   "p_states_points_map.png",
-#   plot = p,
-#   width = 7,
-#   height = 6,
-#   dpi = 300
-# )
-
 ```
+
 
