@@ -45,7 +45,6 @@ To ensure valid inference using a Distributed Lag Non‑Linear Model (DLNM), epi
 ```{r}
 
 epi <- readxl::read_xlsx("data/ts_check.xlsx")
-
 epi = epi %>% 
   mutate(
     PD85 = planting_date+85
@@ -5022,5 +5021,414 @@ print(p)
 
 ggsave("fig/severity_scenarios.png", dpi = 600, width = 8, height = 6)
 ```
+```{r}
+weather_data <- epi %>%
+  mutate(
+    # Criando a data permitida diretamente com base no estado
+    allowed_date = case_when(
+      state == "MT" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")), 
+      state == "MS" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")),
+      state == "GO" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-25")),
+      state == "PR" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-11")),
+      state == "TO" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "DF" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "BA" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
+      state == "MG" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")) 
+    ),
+    # Ajustando o ano da allowed_date para casos de janeiro e fevereiro
+    allowed_date = if_else(
+      format(planting_date, "%m") %in% c("01", "02"), 
+      as.Date(paste0(as.numeric(format(planting_date, "%Y")) - 1, "-", format(allowed_date, "%m-%d"))),
+      allowed_date
+    ),
+    # Calculando a diferença em dias
+    days_difference = as.numeric(planting_date - allowed_date)
+  )
+```
 
+# POINTS
+
+```{r}
+library(gsheet)
+points = read_xlsx("data/points_states.xlsx")
+
+years <- 2012:2024
+
+p_states <- crossing(points, year = years)
+
+
+p_states <- p_states %>%
+  mutate(
+    # Criando a data permitida diretamente com base no estado
+    allowed_date = case_when(
+      state == "MT" ~ as.Date(paste0(format(year), "-09-16")), 
+      state == "MS" ~ as.Date(paste0(format(year), "-09-16")),
+      state == "GO" ~ as.Date(paste0(format(year), "-09-25")),
+      state == "PR" ~ as.Date(paste0(format(year), "-09-11")),
+      state == "TO" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "DF" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "BA" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "MG" ~ as.Date(paste0(format(year), "-10-01")) ,
+      state == "SP" ~ as.Date(paste0(format(year), "-10-01")) 
+    ))
+
+
+p_states$id1 <- seq_len(nrow(p_states))
+
+
+p_states <- p_states %>%
+  mutate(
+    id1 = as.integer(id1),
+    allowed_date = as.Date(allowed_date)
+  )
+
+```
+
+
+```{r}
+
+
+test <- p_states[1:10, ]
+
+# criar pixel ERA5 nos pontos originais
+test <- test %>%
+  mutate(
+    longitude = round(longitude / 0.10) * 0.10,
+    latitude = round(latitude  / 0.10) * 0.10
+  )
+
+wx_states <- wx_states %>%
+  mutate(
+    lon25 = round(longitude / 0.10) * 0.10,
+    lat25 = round(latitude  / 0.10) * 0.10
+  )
+
+# join de volta
+test_with_era5 <- test %>%
+  left_join(
+    wx_states,
+    by = c("lon25","lat25","allowed_date")
+  )
+
+library(purrr)
+
+
+chunks <- split(test, ceiling(seq_len(nrow(test)) / 1000))
+
+wx_states <- map_dfr(
+  chunks,
+  ~ get_era5(
+      data        = .x,
+      days_around = 85,
+      date_col    = "allowed_date",
+      study_col   = "id1",
+      pars        = c(
+        "temperature_2m"),
+      direction   = "forth"
+    )
+)
+
+get_era5(
+  data = test,
+  days_around = "85",
+  date_col = "allowed_date",
+  study_col = "id1",
+  pars = c("temperature_2m", "relative_humidity_2m", "precipitation", "dewpoint_2m"),
+  models = NULL,
+  direction = "forth"
+)
+
+
+min(wx_states$date)
+max(wx_states$date)
+
+unique(wx_states$study)
+
+wx_states1 = wx_states %>% 
+  dplyr::group_by(study,latitude,longitude) %>% 
+  summarise(
+    mean = mean(T2M_MAX)
+  )
+```
+
+```{r}
+
+library(dplyr)
+
+wx_states1 <- wx_states1 %>%
+  mutate(
+    longitude = as.numeric(longitude),
+    latitude  = as.numeric(latitude))
+   
+
+library(terra)
+
+res_deg <- 0.10   # ajuste: 0.10 se for ERA5-Land
+
+r_template <- rast(
+  xmin = min(wx_states1$longitude), xmax = max(wx_states1$longitude),
+  ymin = min(wx_states1$latitude),  ymax = max(wx_states1$latitude),
+  resolution = res_deg,
+  crs = "EPSG:4326"
+)
+
+# rasteriza pontos para o template
+r_tmax <- rasterize(
+  x = wx_states1[, c("longitude","latitude")],
+  y = r_template,
+  values = wx_states1$mean,
+  fun = mean,          # se cair mais de um ponto na mesma célula
+  background = NA
+)
+
+
+library(geobr)
+library(sf)
+library(ggplot2)
+library(tidyterra)
+
+br <- read_country(year = 2020) %>% st_transform(4326)
+
+ggplot() +
+  geom_spatraster(data = r_tmax) +
+  geom_sf(data = br, fill = NA, color = "black", linewidth = 0.2) +
+  scale_fill_viridis_c(name = "Tmax média (°C)", na.value = "transparent") +
+  coord_sf(expand = FALSE) +
+  theme_minimal()
+```
+```{r}
+p_states = p_states %>% 
+  mutate(
+    PD85 = allowed_date+15
+  ) %>% 
+  filter(year == 2012)
+
+unique(p_states$state)
+
+p_states %>% 
+  filter(state == "SP")
+```
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(terra)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADA: NetCDF diário (2012 inteiro)
+# =========================================================
+nc_path <- "C:/Users/RTomaz/OneDrive - LSU AgCenter/Documents/GitHub/paper_TS_weather/data/era5land_daily_tmax_2012.nc"
+
+# =========================================================
+# 2) LER O NetCDF
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+# =========================================================
+# 3) PREPARAR p_states
+# =========================================================
+p_states <- p_states %>%
+  mutate(
+    allowed_date = as.Date(allowed_date),
+    PD85         = as.Date(PD85),
+    pt_id        = row_number()
+  )
+
+pts_v <- vect(
+  p_states,
+  geom = c("longitude", "latitude"),
+  crs  = "EPSG:4326"
+)
+
+# =========================================================
+# 4) GARANTIR CRS CONSISTENTE
+# =========================================================
+if (!is.na(crs(r)) && crs(r) != crs(pts_v)) {
+  pts_v <- project(pts_v, crs(r))
+}
+
+# =========================================================
+# 5) EXTRAÇÃO (COM lon/lat!)
+# =========================================================
+ext <- terra::extract(
+  r,
+  pts_v,
+  xy = TRUE,     # <<< ESSENCIAL
+  ID = FALSE
+)
+
+# =========================================================
+# 6) FORMATO LONGO (pt_id, lon, lat, date, tmax)
+# =========================================================
+tmax_long <- ext %>%
+  mutate(pt_id = p_states$pt_id) %>%
+  pivot_longer(
+    cols = -(c(x, y, pt_id)),
+    names_to = "layer",
+    values_to = "tmax"
+  ) %>%
+  mutate(
+    date = dates_all[match(layer, names(r))],
+    longitude = x,
+    latitude  = y
+  ) %>%
+  select(pt_id, longitude, latitude, date, tmax)
+
+# =========================================================
+# 7) JUNTAR allowed_date / PD85 + FILTRAR JANELA
+# =========================================================
+tmax_window <- tmax_long %>%
+  left_join(
+    p_states %>% select(pt_id, allowed_date, PD85),
+    by = "pt_id"
+  ) %>%
+  filter(date >= allowed_date,
+         date <= PD85)
+
+# =========================================================
+# 8) CONVERTER K → °C (SE NECESSÁRIO)
+# =========================================================
+if (mean(tmax_window$tmax, na.rm = TRUE) > 100) {
+  tmax_window <- tmax_window %>%
+    mutate(tmax = tmax - 273.15)
+}
+
+# =========================================================
+# 9) CRIAR dpp (0–85)
+# =========================================================
+tmax_window <- tmax_window %>%
+  mutate(dpp = as.integer(date - allowed_date)) %>%
+  filter(dpp >= 0, dpp <= 85)
+
+# =========================================================
+# 10) RESULTADO FINAL
+# =========================================================
+print(tmax_window)
+
+```
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# =========================================================
+# 1) CALCULAR MÉDIA POR LAT/LON
+# =========================================================
+tmax_mean_grid <- tmax_window %>%
+  group_by(longitude, latitude) %>%
+  summarise(
+    tmax_mean = mean(tmax, na.rm = TRUE),
+    n_days    = n(),
+    .groups   = "drop"
+  )
+
+# Checagem rápida
+summary(tmax_mean_grid$tmax_mean)
+
+# =========================================================
+# 2) MAPA COM PIXELS CONTÍNUOS (grid regular 0.1 x 0.1)
+# =========================================================
+p <- ggplot(
+  tmax_mean_grid,
+  aes(x = longitude, y = latitude, fill = tmax_mean)
+) +
+  geom_raster(interpolate = FALSE) +
+  coord_equal(expand = FALSE) +
+  scale_fill_viridis_c(
+    option = "C",
+    name   = expression(T[max]~"média (°C)"),
+    labels = label_number(accuracy = 0.1)
+  ) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    title = "Temperatura máxima média (janela PD85)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+print(p)
+
+# =========================================================
+# 3) (OPCIONAL) SALVAR FIGURA
+# =========================================================
+# ggsave(
+#   filename = "tmax_mean_PD85_map.png",
+#   plot     = p,
+#   width    = 8,
+#   height   = 6,
+#   dpi      = 300
+# )
+
+```
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(ggplot2)
+
+# =========================================================
+# 1) Checagem mínima do banco
+# =========================================================
+# Espera-se que p_states tenha:
+# longitude, latitude
+
+stopifnot(all(c("longitude", "latitude") %in% names(p_states)))
+
+# Remover possíveis NAs (boa prática)
+pts_plot <- p_states %>%
+  filter(!is.na(longitude), !is.na(latitude))
+
+# =========================================================
+# 2) Plotar pontos no mapa
+# =========================================================
+p <- ggplot(
+  pts_plot,
+  aes(x = longitude, y = latitude)
+) +
+  geom_point(
+    color = "red",
+    size  = 0.8,
+    alpha = 0.6
+  ) +
+  coord_equal(expand = FALSE) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    title = "Distribuição espacial dos pontos (p_states)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p)
+
+# =========================================================
+# 3) (Opcional) Salvar figura
+# =========================================================
+# ggsave(
+#   "p_states_points_map.png",
+#   plot = p,
+#   width = 7,
+#   height = 6,
+#   dpi = 300
+# )
+
+```
 
