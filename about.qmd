@@ -5202,9 +5202,8 @@ ggplot() +
 ```{r}
 p_states = p_states %>% 
   mutate(
-    PD85 = allowed_date+15
-  ) %>% 
-  filter(year == 2012)
+    PD85 = allowed_date+85
+  )
 
 unique(p_states$state)
 
@@ -5468,6 +5467,67 @@ p <- ggplot(
 print(p)
 
 ggsave("fig/tmax.png", dpi = 600)
+```
+```{r}
+osmar = read_xlsx("data/osmar.xlsx")
+
+osmar = osmar %>% 
+  filter(!Bacteria == "Pc")
+  
+osmar %>%  
+  #filter(Tratamento == "Kribbella sp. 5N_D3") %>% 
+  ggplot(aes(Galhas_g,Ovos_g))+
+  geom_jitter(size = 2, width = .5)+
+  geom_smooth(method = "lm", se = F)+
+  theme_bw()+
+  labs(x = "Número de galhas",
+       y = "Número de ovos")+
+  theme(text = element_text(size = 14, face = "bold"))
+
+ggsave("fig/ovos_galhas.png", dpi = 600)
+
+osmar %>%  
+  #filter(Tratamento == "Kribbella sp. 5N_D3") %>% 
+  ggplot(aes(Dose,Ovos_g))+
+  geom_jitter(size = 2, width = .5)+
+  geom_smooth(method = "lm", se = F)+
+  theme_bw()+
+  labs(x = "Dose",
+       y = "Número de ovos")+
+  theme(text = element_text(size = 14, face = "bold"))
+  
+ggsave("fig/dose.png", dpi = 600)
+
+  unique(osmar$Bacteria)
+  
+  unique(osmar$Tratamento)
+  
+osmar2 = read_xlsx("data/osmar2.xlsx")
+
+osmar2 = osmar2 %>% 
+  filter(!Tratamento == "Pc")
+  
+model_osmar = lmer(Ovos.g ~ Tratamento + (1|Bloco), data = osmar2)
+
+performance::check_model(model_osmar)
+performance::check_normality(model_osmar)
+performance::check_heteroscedasticity(model_osmar)
+summary(model_osmar)
+
+emmeans::emm_options(lmer.df = "satterthwaite")
+emm = emmeans::emmeans(model_osmar, ~Tratamento)
+mm = emmeans::contrast(emm, method = "trt.vs.ctrl")#, by = "gen"
+mm
+
+emm = emmeans::emmeans(model_osmar, ~Tratamento, ref = "_CHECK")
+cld_emm <- multcomp::cld(
+  emm,
+  adjust = "dunnettx",   # ou "tukey", "none"
+  Letters = letters
+)
+
+cld_emm
+
 ```
 
 
