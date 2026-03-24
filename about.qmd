@@ -1357,7 +1357,9 @@ scale_fill_gradient2(
   )
 )+
   # eixos e guias
-  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  #scale_x_reverse()+
+  scale_x_continuous(trans = "reverse",
+    breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +
   labs(
@@ -1736,6 +1738,7 @@ p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
+    trans = "reverse",
     breaks = c(0,10,20,30,40,50,60,70,80),
     limits = c(0,85),
     expand = c(0, 0)
@@ -1746,7 +1749,6 @@ p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
     expand = c(0, 0))
 
 print(p_heat_diff_tmax)
-
 ```
 
 
@@ -1890,7 +1892,8 @@ scale_fill_gradient2(
   )
 )+
   # eixos e guias
-  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  scale_x_continuous(trans = "reverse",
+    breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +
   labs(
@@ -2281,6 +2284,7 @@ p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
+    trans = "reverse",
     breaks = c(0,10,20,30,40,50,60,70,80),
     limits = c(0,85),
     expand = c(0, 0)
@@ -2433,7 +2437,8 @@ scale_fill_gradient2(
   )
 ) +
   # eixos e guias
-  scale_x_continuous(breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
+  scale_x_continuous(trans = "reverse",
+    breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +
   labs(
@@ -2828,6 +2833,7 @@ p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)
   theme(plot.title = element_text(face = "bold"),
         axis.title = element_text(face = "bold"))+
   scale_x_continuous(
+    trans = "reverse",
     breaks = c(0,10,20,30,40,50,60,70,80),
     limits = c(0,85),
     expand = c(0, 0)
