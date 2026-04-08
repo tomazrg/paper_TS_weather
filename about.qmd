@@ -5535,5 +5535,3664 @@ cld_emm <- multcomp::cld(
 cld_emm
 
 ```
+# MAPA ERA5 COM DLNM
 
+## Earlier
+```{r}
+
+points = read_xlsx("data/points_states.xlsx")
+
+#years <- 2012:2024
+years <- 2005:2024
+
+p_states <- crossing(points, year = years)
+
+
+p_states <- p_states %>%
+  mutate(
+    # Criando a data permitida diretamente com base no estado
+    allowed_date = case_when(
+      state == "MT" ~ as.Date(paste0(format(year), "-09-16")), 
+      state == "MS" ~ as.Date(paste0(format(year), "-09-16")),
+      state == "GO" ~ as.Date(paste0(format(year), "-09-25")),
+      state == "PR" ~ as.Date(paste0(format(year), "-09-11")),
+      state == "TO" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "DF" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "BA" ~ as.Date(paste0(format(year), "-10-01")),
+      state == "MG" ~ as.Date(paste0(format(year), "-10-01")) ,
+      state == "SP" ~ as.Date(paste0(format(year), "-10-01")) 
+    ))
+
+
+p_states$id1 <- seq_len(nrow(p_states))
+
+
+p_states <- p_states %>%
+  mutate(
+    id1 = as.integer(id1),
+    allowed_date = as.Date(allowed_date)
+  )
+
+
+```
+
+
+```{r}
+p_states = p_states %>% 
+  mutate(
+    PD85 = allowed_date+85
+  )
+
+unique(p_states$state)
+
+p_states %>% 
+  filter(state == "SP")
+
+```
+
+
+### TMAX
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+# manter apenas linhas válidas
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+# opcional: garantir janela máxima de 85 dias
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF UMA VEZ
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+
+# CRS do raster
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+  cat("N pontos:", nrow(pts_year), "\n")
+
+  # intervalo mínimo necessário para este ano
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+
+  # layers do raster estritamente necessários
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) {
+    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    return(NULL)
+  }
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  cat("N camadas usadas:", length(idx), "\n")
+
+  # saída do ano
+  out_file <- file.path(out_dir, paste0("tmax_window_", yr, ".csv.gz"))
+
+  # remover se já existir
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+    e <- min(s + chunk_size - 1, n)
+    cat("  Chunk:", s, "-", e, "de", n, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    # criar vetor espacial
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    # reprojetar se necessário
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    # extração
+    ext <- terra::extract(
+      r_sub,
+      pts_v,
+      xy = TRUE,
+      ID = FALSE
+    )
+
+    ext_dt <- as.data.table(ext)
+
+    # adicionar pt_id na mesma ordem do chunk
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    # formato longo sem usar pivot_longer
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "tmax",
+      variable.factor = FALSE
+    )
+
+    # mapear datas
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    # renomear coordenadas extraídas
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    # juntar datas de interesse do ponto
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    # filtrar janela real do ponto
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    # dpp
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # Kelvin -> Celsius se necessário
+    if (nrow(long_dt) > 0) {
+      media_tmax <- mean(long_dt$tmax, na.rm = TRUE)
+      if (!is.na(media_tmax) && media_tmax > 100) {
+        long_dt[, tmax := tmax - 273.15]
+      }
+    }
+
+    # selecionar colunas finais
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, tmax, allowed_date, PD85
+    )]
+
+    # gravar incrementalmente
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file),
+      sep = ","
+    )
+
+    # limpar memória
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc(verbose = FALSE)
+  }
+
+  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  return(out_file)
+}
+
+# =========================================================
+# 5) RODAR ANO A ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr = yr,
+    pts_year = pts_year,
+    r = r,
+    dates_all = dates_all,
+    layer_names = layer_names,
+    out_dir = out_dir,
+    chunk_size = chunk_size
+  )
+
+  # limpar
+  rm(pts_year)
+  gc(verbose = FALSE)
+}
+
+# =========================================================
+# 6) JUNTAR TODOS OS ANOS
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "tmax_window_all_years2.csv.gz")
+
+if (length(valid_files) > 0) {
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+    dt_tmp <- fread(f)
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file),
+      sep = ","
+    )
+    rm(dt_tmp)
+    gc(verbose = FALSE)
+  }
+
+  cat("\nArquivo final salvo em:\n", final_file, "\n")
+} else {
+  cat("\nNenhum arquivo anual foi criado.\n")
+}
+```
+
+```{r}
+library(data.table)
+
+#dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/tmax_window_all_years.csv.gz")
+dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/tmax_window_all_years2.csv.gz")
+
+
+dt_tmax[
+  ,
+  year := year(max(date)),
+  by = pt_id
+]
+
+
+dt_tmax2 <- dt_tmax %>%
+  group_by(longitude, latitude,year) %>%
+  summarise(
+    tmax = mean(tmax, na.rm = TRUE),
+    n_days    = n(),
+    .groups   = "drop"
+  )
+
+p_tmax <- dt_tmax2 %>% 
+ # filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = tmax)) +
+  geom_raster(interpolate = FALSE) +
+  coord_equal(expand = FALSE) +
+ scale_fill_distiller(
+  palette = "OrRd",
+  direction = 1) +
+  facet_wrap(~year, nrow = 2)+
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        #axis.text = element_blank(),
+        legend.position = "right")
+
+min(dt_tmax$allowed_date)
+min(dt_tmax$PD85)
+
+max(dt_tmax$allowed_date)
+max(dt_tmax$PD85)
+```
+
+### RAIN
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+# manter apenas linhas válidas
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+# opcional: garantir janela máxima de 85 dias
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF UMA VEZ
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+
+# CRS do raster
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+  cat("N pontos:", nrow(pts_year), "\n")
+
+  # intervalo mínimo necessário para este ano
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+
+  # layers do raster estritamente necessários
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) {
+    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    return(NULL)
+  }
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  cat("N camadas usadas:", length(idx), "\n")
+
+  # saída do ano
+  out_file <- file.path(out_dir, paste0("prcp_window_", yr, ".csv.gz"))
+
+  # remover se já existir
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+    e <- min(s + chunk_size - 1, n)
+    cat("  Chunk:", s, "-", e, "de", n, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    # criar vetor espacial
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    # reprojetar se necessário
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    # extração
+    ext <- terra::extract(
+      r_sub,
+      pts_v,
+      xy = TRUE,
+      ID = FALSE
+    )
+
+    ext_dt <- as.data.table(ext)
+
+    # adicionar pt_id na mesma ordem do chunk
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    # formato longo
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "prcp",
+      variable.factor = FALSE
+    )
+
+    # mapear datas
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    # renomear coordenadas extraídas
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    # juntar datas de interesse do ponto
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    # filtrar janela real do ponto
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    # dpp
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # AJUSTE DE UNIDADE DA CHUVA, SE NECESSÁRIO
+    # =====================================================
+    # ERA5-Land daily precipitation pode vir em metros (m)
+    # Se os valores estiverem muito pequenos, converte para mm
+    if (nrow(long_dt) > 0) {
+      media_prcp <- mean(long_dt$prcp, na.rm = TRUE)
+
+      # regra prática:
+      # se a média for menor que 1, é bem provável que esteja em metros
+      if (!is.na(media_prcp) && media_prcp < 1) {
+        long_dt[, prcp := prcp]
+      }
+    }
+
+    # selecionar colunas finais
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, prcp, allowed_date, PD85
+    )]
+
+    # gravar incrementalmente
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file),
+      sep = ","
+    )
+
+    # limpar memória
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc(verbose = FALSE)
+  }
+
+  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  return(out_file)
+}
+
+# =========================================================
+# 5) RODAR ANO A ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr = yr,
+    pts_year = pts_year,
+    r = r,
+    dates_all = dates_all,
+    layer_names = layer_names,
+    out_dir = out_dir,
+    chunk_size = chunk_size
+  )
+
+  rm(pts_year)
+  gc(verbose = FALSE)
+}
+
+# =========================================================
+# 6) JUNTAR TODOS OS ANOS
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "prcp_window_all_years2.csv.gz")
+
+if (length(valid_files) > 0) {
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+    dt_tmp <- fread(f)
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file),
+      sep = ","
+    )
+    rm(dt_tmp)
+    gc(verbose = FALSE)
+  }
+
+  cat("\nArquivo final salvo em:\n", final_file, "\n")
+} else {
+  cat("\nNenhum arquivo anual foi criado.\n")
+}
+```
+
+```{r}
+library(data.table)
+
+#dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/prcp_window_all_years.csv.gz")
+dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/prcp_window_all_years2.csv.gz")
+#dt_rain[, year := year(date)]
+```
+
+### TMEAN
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO POR ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) return(NULL)
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  out_file <- file.path(out_dir, paste0("tmean_window_", yr, ".csv.gz"))
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+
+    e <- min(s + chunk_size - 1, n)
+    cat("Chunk:", s, "-", e, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    ext <- terra::extract(r_sub, pts_v, xy = TRUE, ID = FALSE)
+    ext_dt <- as.data.table(ext)
+
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "tmean",
+      variable.factor = FALSE
+    )
+
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # Kelvin -> Celsius (IMPORTANTE)
+    # =====================================================
+    if (nrow(long_dt) > 0) {
+      media_tmean <- mean(long_dt$tmean, na.rm = TRUE)
+
+      if (!is.na(media_tmean) && media_tmean > 100) {
+        long_dt[, tmean := tmean - 273.15]
+      }
+    }
+
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, tmean, allowed_date, PD85
+    )]
+
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file)
+    )
+
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc()
+  }
+
+  return(out_file)
+}
+
+# =========================================================
+# 5) LOOP POR ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr, pts_year, r, dates_all, layer_names,
+    out_dir, chunk_size
+  )
+
+  rm(pts_year)
+  gc()
+}
+
+# =========================================================
+# 6) JUNTAR TUDO
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "tmean_window_all_years2.csv.gz")
+
+if (length(valid_files) > 0) {
+
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+
+    dt_tmp <- fread(f)
+
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file)
+    )
+
+    rm(dt_tmp)
+    gc()
+  }
+
+  cat("Arquivo final salvo em:", final_file, "\n")
+}
+```
+
+```{r}
+library(data.table)
+
+#dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly/tmean_window_all_years.csv.gz")
+
+dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly/tmean_window_all_years2.csv.gz")
+
+
+min(dt_tmax$allowed_date)
+min(dt_tmax$PD85)
+
+max(dt_tmean$allowed_date)
+max(dt_tmean$PD85)
+```
+### RH
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO POR ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) return(NULL)
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  out_file <- file.path(out_dir, paste0("rh_window_", yr, ".csv.gz"))
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+
+    e <- min(s + chunk_size - 1, n)
+    cat("Chunk:", s, "-", e, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    ext <- terra::extract(r_sub, pts_v, xy = TRUE, ID = FALSE)
+    ext_dt <- as.data.table(ext)
+
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "rh",
+      variable.factor = FALSE
+    )
+
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # CHECAGEM OPCIONAL DE UNIDADE
+    # =====================================================
+    # Se RH estiver em fração (0-1), converte para %
+    if (nrow(long_dt) > 0) {
+      media_rh <- mean(long_dt$rh, na.rm = TRUE)
+
+      if (!is.na(media_rh) && media_rh <= 1) {
+        long_dt[, rh := rh * 100]
+      }
+    }
+
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, rh, allowed_date, PD85
+    )]
+
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file)
+    )
+
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc()
+  }
+
+  return(out_file)
+}
+
+# =========================================================
+# 5) LOOP POR ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr, pts_year, r, dates_all, layer_names,
+    out_dir, chunk_size
+  )
+
+  rm(pts_year)
+  gc()
+}
+
+# =========================================================
+# 6) JUNTAR TUDO
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "rh_window_all_years2.csv.gz")
+
+if (length(valid_files) > 0) {
+
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+
+    dt_tmp <- fread(f)
+
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file)
+    )
+
+    rm(dt_tmp)
+    gc()
+  }
+
+  cat("Arquivo final salvo em:", final_file, "\n")
+}
+```
+
+```{r}
+library(data.table)
+
+#dt_rh <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly/rh_window_all_years.csv.gz")
+dt_rh <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly/rh_window_all_years2.csv.gz")
+```
+
+
+```{r}
+library(data.table)
+dt_tmax <- unique(dt_tmax, by = c("pt_id", "date"))
+dt_tmean <- unique(dt_tmean, by = c("pt_id", "date"))
+dt_rh    <- unique(dt_rh,    by = c("pt_id", "date"))
+
+# =========================================================
+# 3) Definir chaves
+# =========================================================
+setkey(dt_rain,  pt_id, date)
+setkey(dt_tmax,  pt_id, date)
+setkey(dt_tmean, pt_id, date)
+setkey(dt_rh,    pt_id, date)
+
+# =========================================================
+# 4) JOIN CORRETO
+#    → chuva define o calendário
+# =========================================================
+dt_climate <- dt_rain[
+  dt_tmax,  on = .(pt_id, date)
+][
+  dt_tmean, on = .(pt_id, date)
+][
+  dt_rh,    on = .(pt_id, date)
+]
+
+# =========================================================
+# 5) Criar year
+# =========================================================
+dt_climate[, year := year(date)]
+
+# =========================================================
+# 6) CHECKS OBRIGATÓRIOS
+# =========================================================
+
+# 6.1 Nenhum pt_id + date repetido
+stopifnot(
+  nrow(dt_climate[, .N, by = .(pt_id, date)][N > 1]) == 0
+)
+
+# 6.2 Datas finais = datas da chuva
+stopifnot(
+  setequal(dt_climate$date, dt_rain$date)
+)
+
+# 6.3 Mesmo número de linhas da chuva
+stopifnot(
+  nrow(dt_climate) == nrow(dt_rain)
+)
+
+# =========================================================
+# 7) Resultado final
+# =========================================================
+p_state_overall <- dt_climate
+
+library(lubridate)
+
+# =========================================================
+# 0) Garantir data.table
+# =========================================================
+setDT(dt_rain)
+setDT(dt_tmax)
+setDT(dt_tmean)
+setDT(dt_rh)
+
+# =========================================================
+# 1) Garantir que date é Date
+# =========================================================
+dt_rain[,  date := as.Date(date)]
+dt_tmax[,  date := as.Date(date)]
+dt_tmean[, date := as.Date(date)]
+dt_rh[,    date := as.Date(date)]
+
+# =========================================================
+# 2) Garantir UNICIDADE (sem agregação)
+#    Se houver duplicata aqui, é problema de origem
+# =========================================================
+dt_rain  <- unique(dt_rain,  by = c("pt_id", "date"))
+p_state_overall[, year := year(date)]
+
+max(p_state_overall$PD85)
+```
+
+```{r}
+library(data.table)
+setDT(p_state_overall)
+
+p_state_overall[
+  , .N,
+  by = .(pt_id, year, dpp)
+][N > 1]
+
+
+p_state_overall[
+  , .(n_dpp = uniqueN(dpp)),
+  by = .(pt_id, year)
+][n_dpp != 86]
+
+p_state_overall[
+  , .(ok = all(sort(dpp) == 0:85)),
+  by = .(pt_id, year)
+][ok == FALSE]
+
+p_state_overall[
+  , .N,
+  by = .(pt_id, year)
+][N != 86]
+
+p_state_overall[
+  , .(n_years = uniqueN(year)),
+  by = pt_id
+]
+
+stopifnot(
+  nrow(p_state_overall[, .N, by = .(pt_id, year, dpp)][N > 1]) == 0,
+  nrow(p_state_overall[, .(n_dpp = uniqueN(dpp)), by = .(pt_id, year)][n_dpp != 86]) == 0,
+  nrow(p_state_overall[, .(ok = all(sort(dpp) == 0:85)), by = .(pt_id, year)][ok == FALSE]) == 0
+)
+```
+
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# =========================================================
+# 1) CALCULAR MÉDIA POR LAT/LON
+# =========================================================
+tmax_mean_grid <- p_state_overall %>%
+  group_by(longitude, latitude,year) %>%
+  summarise(
+    tmax = mean(tmax, na.rm = TRUE),
+    rain = sum(prcp, na.rm = TRUE),
+    rh = mean(rh, na.rm = TRUE),
+    n_days    = n(),
+    .groups   = "drop"
+  )
+
+
+# =========================================================
+# 2) MAPA COM PIXELS CONTÍNUOS (grid regular 0.1 x 0.1)
+# =========================================================
+
+p_tmax <- tmax_mean_grid %>% 
+ # filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = tmax)) +
+  geom_raster(interpolate = FALSE) +
+  coord_equal(expand = FALSE) +
+ scale_fill_distiller(
+  palette = "OrRd",
+  direction = 1) +
+  facet_wrap(~year, nrow = 2)+
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        #axis.text = element_blank(),
+        legend.position = "right")
+
+print(p_tmax)
+
+
+
+p_rain <- tmax_mean_grid %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = rain)) +
+  geom_raster(interpolate = FALSE) +
+  coord_equal(expand = FALSE) +
+ scale_fill_distiller(
+  palette = "Blues",
+  direction = 1) +
+  facet_wrap(~year, nrow = 2)+
+ labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+       # axis.text = element_blank(),
+        legend.position = "right")
+
+print(p_rain)
+
+p_rh <- tmax_mean_grid %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = rh)) +
+  geom_raster(interpolate = FALSE) +
+  coord_equal(expand = FALSE) +
+ scale_fill_distiller(
+  palette = "YlGn",
+  direction = 1) +
+  facet_wrap(~year, nrow = 2)+
+ labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "right")
+
+print(p_rh)
+
+library(patchwork)
+library(cowplot)
+
+plot_grid(p_tmax/p_rain/p_rh)
+
+#ggsave("map.png", dpi = 600, height =12,width = 10, bg = "white")
+```
+
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(sf)
+library(geobr)
+library(ggplot2)
+
+# =========================================================
+# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
+#    >>> Edite esta linha <<<
+# =========================================================
+states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
+# Exemplo acima — troque pelas suas UFs
+
+# --- ALTERNATIVA (se preferir remover em vez de manter):
+# states_remove <- c("PA","TO","MA","PI","CE","BA")
+# (aí, mais abaixo, use !%in% em vez de %in%)
+
+# =========================================================
+# 2) Ler estados (geobr) e garantir CRS
+# =========================================================
+br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
+  st_transform(4326)
+
+# Filtrar SOMENTE os estados desejados
+br_states_use <- br_states %>%
+  filter(abbrev_state %in% states_keep)
+
+# --- ALTERNATIVA (se estiver usando states_remove):
+# br_states_use <- br_states %>%
+#   filter(!abbrev_state %in% states_remove)
+
+# Polígono máscara (dissolve)
+mask_states <- st_union(br_states_use)
+
+# =========================================================
+# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
+#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# =========================================================
+tmax_mean_grid_clean <- tmax_mean_grid %>%
+  filter(
+    !is.na(longitude),
+    !is.na(latitude),
+    !is.na(tmax)
+  )
+
+# Converter pixels (lon/lat) para sf
+grid_sf <- st_as_sf(
+  tmax_mean_grid_clean,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+)
+
+# =========================================================
+# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
+# =========================================================
+grid_sf_clip <- st_filter(grid_sf, mask_states)
+
+tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
+
+# =========================================================
+# 5) Plot final (somente estados escolhidos)
+# =========================================================
+p_tmax <- tmax_mean_grid_clip %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = tmax)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "OrRd",
+    direction = 1) +
+  labs(
+    x = "",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  facet_wrap(~year, nrow = 2)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       axis.text.x = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+p_rain <- tmax_mean_grid_clip %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = rain)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "Blues",
+    direction = 1) +
+  labs(
+    x = "",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  facet_wrap(~year, nrow = 2)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       axis.text.x = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+p_rh <- tmax_mean_grid_clip %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = rh)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "YlGn",
+    direction = 1) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  facet_wrap(~year, nrow = 2)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+
+(p_tmax/p_rain/p_rh) +
+  theme(plot.margin = margin(t = 5, r = 10, b = 10, l = 20))
+
+library(ggpubr)
+   ggarrange(
+    p_tmax, p_rain, p_rh,
+    ncol = 1, nrow = 3,
+    labels = c("(a)", "(b)", "(c)"), 
+    font.label = list(color = "black", face = "bold", size = 14),
+    align = "v",               
+    heights = c(0.6, 0.6, 0.6)        
+  )
+  
+#ggsave("map.png", dpi = 600, height =12,width = 10, bg = "white")
+```
+
+### DLNM
+```{r}
+p_state_overall = p_state_overall %>% 
+  select(pt_id, year,longitude,latitude, date, dpp, tmax, tmean, rh, prcp)
+
+colnames(p_state_overall) = c("pixel_id", "year","longitude", "latitude", "date","dpp",
+                              "tmax", "tmean", "rh", "rain")
+
+
+es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
+p_state_overall <- p_state_overall |>
+  mutate(vpd = es(tmean) * (1 - rh / 100))
+
+#wx_use = wx_use %>% 
+  #filter(dpp >=15)
+
+
+p_state_overall <- p_state_overall |>
+  arrange(pixel_id, date) |>
+  group_by(pixel_id) |>
+  mutate(rain_cum = cumsum(rain)) |>
+  ungroup()
+```
+
+```{r}
+p_state_overall %>%
+  summarise(
+    tmax_na = sum(!is.finite(tmax)),
+    rain_na = sum(!is.finite(rain_cum)),
+    vpd_na  = sum(!is.finite(vpd))
+  )
+```
+### All variables
+```{r}
+# --- Dados observados ---
+wx_use      # dados longos observados
+dat         # banco final do modelo (com cb_*)
+fit_sel     # modelo glmmTMB ajustado
+
+# --- Dados ERA5 ---
+p_state_overall   # ERA5 limpo, alinhado, com dpp = 0:85 completos
+
+# --- Parâmetros do modelo ---
+VARS       <- c("tmax", "rain_cum", "vpd")
+LAG_MAX    <- 85
+DF_VAR     <- 4      # ou o valor que você usou
+DF_LAG     <- 4
+SEPARATOR  <- 10     # exatamente o mesmo do ajuste
+
+
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(dlnm)
+library(ggplot2)
+
+# =========================================================
+# 1) CRIAR cb_templates (A PARTIR DO OBSERVADO)
+# =========================================================
+
+build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
+
+  ids <- unique(wx_long$epi_id)
+  out <- vector("list", length(ids))
+
+  for (i in seq_along(ids)) {
+
+    v <- wx_long %>%
+      filter(epi_id == ids[i]) %>%
+      arrange(dpp) %>%
+      pull(.data[[var]])
+
+    out[[i]] <- c(v, rep(NA_real_, sep_n))
+  }
+
+  unlist(out)
+}
+
+cb_templates <- list()
+
+for (v in VARS) {
+
+  x_pool <- build_pooled_series(wx_use, v, sep_n = SEPARATOR)
+
+  cb_templates[[v]] <- crossbasis(
+    x_pool,
+    lag    = LAG_MAX,
+    argvar = list(fun = "ns", df = DF_VAR),
+    arglag = list(fun = "ns", df = DF_LAG)
+  )
+}
+
+# =========================================================
+# 2) PREPARAR ERA5 COMO "EPIDEMIAS"
+# =========================================================
+
+era5_long <- p_state_overall %>%
+  mutate(
+    epi_id = paste(pixel_id, year, sep = "_")
+  ) %>%
+  arrange(epi_id, dpp)
+
+# =========================================================
+# 3) FUNÇÕES PARA GERAR cb_* DO ERA5
+# =========================================================
+
+extract_last_cb_row <- function(x, cb_template) {
+
+  # garantir vetor numérico
+  x <- as.numeric(x)
+
+  # remover NA
+  x <- x[is.finite(x)]
+
+  # checar comprimento mínimo
+  if (length(x) < (LAG_MAX + 1)) {
+    return(rep(NA_real_, ncol(cb_template)))
+  }
+
+  cb <- dlnm::crossbasis(
+    x,
+    lag    = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+
+  as.numeric(cb[length(x), ])
+}
+
+build_design_for_var <- function(wx_long, var, cb_template) {
+
+  X <- wx_long %>%
+    group_by(epi_id) %>%
+    summarise(
+      cb = list(extract_last_cb_row(.data[[var]], cb_template)),
+      .groups = "drop"
+    )
+
+  p  <- length(X$cb[[1]])
+  nm <- paste0("cb_", var, "_", seq_len(p))
+
+  X %>%
+    mutate(cb = lapply(cb, setNames, nm)) %>%
+    unnest_wider(cb)
+}
+
+# =========================================================
+# 4) GERAR cb_* PARA O ERA5
+# =========================================================
+
+X_era5_list <- map(
+  VARS,
+  ~ build_design_for_var(
+      era5_long,
+      .x,
+      cb_templates[[.x]]
+    )
+)
+
+X_era5 <- reduce(X_era5_list, left_join, by = "epi_id")
+
+meta <- era5_long %>%
+  distinct(epi_id, pixel_id, longitude, latitude, year)
+
+X_era5 <- left_join(meta, X_era5, by = "epi_id")
+
+X_era5 <- X_era5 %>%
+  filter(if_all(starts_with("cb_"), is.finite))
+
+# =========================================================
+# 5) PROJETAR NO MODELO DLNM
+# =========================================================
+
+fml_rhs <- delete.response(terms(fit_sel))
+Xmat    <- model.matrix(fml_rhs, data = X_era5)
+beta    <- fixef(fit_sel)$cond
+eta     <- drop(Xmat %*% beta)
+
+X_era5 <- X_era5 %>%
+  mutate(mu = plogis(eta))
+
+# =========================================================
+# 6) EFEITO RELATIVO (PIXEL × ANO)
+# =========================================================
+
+effects_era5 <- X_era5 %>%
+  group_by(pixel_id, longitude, latitude, year) %>%
+  summarise(mu_mean = mean(mu), .groups = "drop")
+
+mu_ref <- mean(effects_era5$mu_mean)
+
+effects_era5 <- effects_era5 %>%
+  mutate(
+    RR        = mu_mean / mu_ref,
+    PERC_mean = (RR - 1) * 100
+  )
+
+# =========================================================
+# 7) GRÁFICOS
+# =========================================================
+
+# Distribuição do risco
+ggplot(effects_era5, aes(RR)) +
+  geom_histogram(bins = 40, fill = "steelblue", color = "black") +
+  theme_bw() +
+  labs(x = "Relative Risk", y = "Frequency")
+
+# Série temporal média
+effects_era5 %>%
+  group_by(year) %>%
+  summarise(RR_mean = mean(RR)) %>%
+  ggplot(aes(year, RR_mean)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+#writexl::write_xlsx(effects_era5,"data/effects_era5.xlsx")
+
+
+effects_era5 %>% 
+  #filter(!year == 2012) %>% 
+ggplot(
+  #filter(effects_era5, year == yr),
+  aes(longitude, latitude, fill = PERC_mean)) +
+  geom_raster() +
+  coord_equal() +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  theme_bw()+
+  facet_wrap(~year)
+
+#sd(effects_era5$mu_mean)
+```
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(sf)
+library(geobr)
+library(ggplot2)
+library(lme4)
+# =========================================================
+# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
+#    >>> Edite esta linha <<<
+# =========================================================
+states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
+# Exemplo acima — troque pelas suas UFs
+
+# --- ALTERNATIVA (se preferir remover em vez de manter):
+# states_remove <- c("PA","TO","MA","PI","CE","BA")
+# (aí, mais abaixo, use !%in% em vez de %in%)
+
+# =========================================================
+# 2) Ler estados (geobr) e garantir CRS
+# =========================================================
+br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
+  st_transform(4326)
+
+# Filtrar SOMENTE os estados desejados
+br_states_use <- br_states %>%
+  filter(abbrev_state %in% states_keep)
+
+# --- ALTERNATIVA (se estiver usando states_remove):
+# br_states_use <- br_states %>%
+#   filter(!abbrev_state %in% states_remove)
+
+# Polígono máscara (dissolve)
+mask_states <- st_union(br_states_use)
+
+# =========================================================
+# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
+#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# =========================================================
+tmax_mean_grid_clean <- effects_era5
+
+# Converter pixels (lon/lat) para sf
+grid_sf <- st_as_sf(
+  tmax_mean_grid_clean,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+)
+
+# =========================================================
+# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
+# =========================================================
+grid_sf_clip <- st_filter(grid_sf, mask_states)
+
+tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
+
+# =========================================================
+# 5) Plot final (somente estados escolhidos)
+# =========================================================
+p_RR <- tmax_mean_grid_clip %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = PERC_mean)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  facet_wrap(~year, nrow = 4)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_text(size = 12, face = "bold"),,
+       axis.title = element_text(face = "bold"),
+       axis.text = element_text(size = 8),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+p_RR
+
+#ggsave("map2.png", dpi = 600, height =6,width = 10, bg = "white")
+
+ggsave("fig2/map_all_ealier.png", dpi = 600, height =10,width = 12, bg = "white")
+```
+
+
+```{r}
+
+tmax_mean_grid_clip_ea = tmax_mean_grid_clip %>% 
+  group_by(latitude,longitude) %>% 
+  summarise(
+    PERC = mean(PERC_mean,na.rm = TRUE),
+    sd = sd(PERC_mean, na.rm = TRUE)
+  )
+
+tmax_mean_grid_clip_ea$period = "Early"
+
+p_RR_ea <- tmax_mean_grid_clip_ea %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = PERC)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+ # facet_wrap(~year, nrow = 4)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_text(size = 12, face = "bold"),,
+       axis.title = element_text(face = "bold"),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip_ea$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip_ea$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+p_RR_ea
+```
+
+## Later
+
+```{r}
+
+points = read_xlsx("data/points_states.xlsx")
+
+#years <- 2012:2024
+years <- 2005:2024
+
+p_states <- crossing(points, year = years)
+
+
+p_states <- p_states %>%
+  mutate(
+    # Criando a data permitida diretamente com base no estado
+    allowed_date = case_when(
+      state == "MT" ~ as.Date(paste0(format(year), "-10-26")), 
+      state == "MS" ~ as.Date(paste0(format(year), "-10-26")),
+      state == "GO" ~ as.Date(paste0(format(year), "-11-04")),
+      state == "PR" ~ as.Date(paste0(format(year), "-10-21")),
+      state == "TO" ~ as.Date(paste0(format(year), "-11-10")),
+      state == "DF" ~ as.Date(paste0(format(year), "-11-10")),
+      state == "BA" ~ as.Date(paste0(format(year), "-11-10")),
+      state == "MG" ~ as.Date(paste0(format(year), "-11-10")) ,
+      state == "SP" ~ as.Date(paste0(format(year), "-11-10")) 
+    ))
+
+
+p_states$id1 <- seq_len(nrow(p_states))
+
+
+p_states <- p_states %>%
+  mutate(
+    id1 = as.integer(id1),
+    allowed_date = as.Date(allowed_date)
+  )
+
+
+
+```
+
+
+```{r}
+#p_states = p_states %>% 
+ # mutate(
+  #  PD85 = allowed_date+85
+  #)
+
+
+p_states <- p_states %>%
+  mutate(PD85 = allowed_date + 85) 
+
+max(p_states$PD85)
+cutoff_date <- as.Date("2025-02-03")
+
+p_states <- p_states %>%
+  filter(PD85 <= cutoff_date)
+
+unique(p_states$year)
+min(p_states$allowed_date)
+max(p_states$allowed_date)
+max(p_states$PD85)
+
+max(dt_rain$PD85)
+```
+
+
+### TMAX
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+# manter apenas linhas válidas
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+# opcional: garantir janela máxima de 85 dias
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF UMA VEZ
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+
+# CRS do raster
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+  cat("N pontos:", nrow(pts_year), "\n")
+
+  # intervalo mínimo necessário para este ano
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+
+  # layers do raster estritamente necessários
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) {
+    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    return(NULL)
+  }
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  cat("N camadas usadas:", length(idx), "\n")
+
+  # saída do ano
+  out_file <- file.path(out_dir, paste0("tmax_window_", yr, ".csv.gz"))
+
+  # remover se já existir
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+    e <- min(s + chunk_size - 1, n)
+    cat("  Chunk:", s, "-", e, "de", n, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    # criar vetor espacial
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    # reprojetar se necessário
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    # extração
+    ext <- terra::extract(
+      r_sub,
+      pts_v,
+      xy = TRUE,
+      ID = FALSE
+    )
+
+    ext_dt <- as.data.table(ext)
+
+    # adicionar pt_id na mesma ordem do chunk
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    # formato longo sem usar pivot_longer
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "tmax",
+      variable.factor = FALSE
+    )
+
+    # mapear datas
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    # renomear coordenadas extraídas
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    # juntar datas de interesse do ponto
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    # filtrar janela real do ponto
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    # dpp
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # Kelvin -> Celsius se necessário
+    if (nrow(long_dt) > 0) {
+      media_tmax <- mean(long_dt$tmax, na.rm = TRUE)
+      if (!is.na(media_tmax) && media_tmax > 100) {
+        long_dt[, tmax := tmax - 273.15]
+      }
+    }
+
+    # selecionar colunas finais
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, tmax, allowed_date, PD85
+    )]
+
+    # gravar incrementalmente
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file),
+      sep = ","
+    )
+
+    # limpar memória
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc(verbose = FALSE)
+  }
+
+  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  return(out_file)
+}
+
+# =========================================================
+# 5) RODAR ANO A ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr = yr,
+    pts_year = pts_year,
+    r = r,
+    dates_all = dates_all,
+    layer_names = layer_names,
+    out_dir = out_dir,
+    chunk_size = chunk_size
+  )
+
+  # limpar
+  rm(pts_year)
+  gc(verbose = FALSE)
+}
+
+# =========================================================
+# 6) JUNTAR TODOS OS ANOS
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "tmax_window_all_years_late.csv.gz")
+
+if (length(valid_files) > 0) {
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+    dt_tmp <- fread(f)
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file),
+      sep = ","
+    )
+    rm(dt_tmp)
+    gc(verbose = FALSE)
+  }
+
+  cat("\nArquivo final salvo em:\n", final_file, "\n")
+} else {
+  cat("\nNenhum arquivo anual foi criado.\n")
+}
+```
+
+```{r}
+library(data.table)
+
+
+dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/tmax_window_all_years_late.csv.gz")
+
+max(dt_tmax$PD85)
+
+dt_tmax %>% 
+  filter()
+```
+
+### RAIN
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+# manter apenas linhas válidas
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+# opcional: garantir janela máxima de 85 dias
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF UMA VEZ
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+
+# CRS do raster
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+  cat("N pontos:", nrow(pts_year), "\n")
+
+  # intervalo mínimo necessário para este ano
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+
+  # layers do raster estritamente necessários
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) {
+    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    return(NULL)
+  }
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  cat("N camadas usadas:", length(idx), "\n")
+
+  # saída do ano
+  out_file <- file.path(out_dir, paste0("prcp_window_", yr, ".csv.gz"))
+
+  # remover se já existir
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+    e <- min(s + chunk_size - 1, n)
+    cat("  Chunk:", s, "-", e, "de", n, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    # criar vetor espacial
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    # reprojetar se necessário
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    # extração
+    ext <- terra::extract(
+      r_sub,
+      pts_v,
+      xy = TRUE,
+      ID = FALSE
+    )
+
+    ext_dt <- as.data.table(ext)
+
+    # adicionar pt_id na mesma ordem do chunk
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    # formato longo
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "prcp",
+      variable.factor = FALSE
+    )
+
+    # mapear datas
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    # renomear coordenadas extraídas
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    # juntar datas de interesse do ponto
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    # filtrar janela real do ponto
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    # dpp
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # AJUSTE DE UNIDADE DA CHUVA, SE NECESSÁRIO
+    # =====================================================
+    # ERA5-Land daily precipitation pode vir em metros (m)
+    # Se os valores estiverem muito pequenos, converte para mm
+    if (nrow(long_dt) > 0) {
+      media_prcp <- mean(long_dt$prcp, na.rm = TRUE)
+
+      # regra prática:
+      # se a média for menor que 1, é bem provável que esteja em metros
+      if (!is.na(media_prcp) && media_prcp < 1) {
+        long_dt[, prcp := prcp]
+      }
+    }
+
+    # selecionar colunas finais
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, prcp, allowed_date, PD85
+    )]
+
+    # gravar incrementalmente
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file),
+      sep = ","
+    )
+
+    # limpar memória
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc(verbose = FALSE)
+  }
+
+  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  return(out_file)
+}
+
+# =========================================================
+# 5) RODAR ANO A ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr = yr,
+    pts_year = pts_year,
+    r = r,
+    dates_all = dates_all,
+    layer_names = layer_names,
+    out_dir = out_dir,
+    chunk_size = chunk_size
+  )
+
+  rm(pts_year)
+  gc(verbose = FALSE)
+}
+
+# =========================================================
+# 6) JUNTAR TODOS OS ANOS
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "prcp_window_all_years_late.csv.gz")
+
+if (length(valid_files) > 0) {
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+    dt_tmp <- fread(f)
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file),
+      sep = ","
+    )
+    rm(dt_tmp)
+    gc(verbose = FALSE)
+  }
+
+  cat("\nArquivo final salvo em:\n", final_file, "\n")
+} else {
+  cat("\nNenhum arquivo anual foi criado.\n")
+}
+```
+
+```{r}
+library(data.table)
+
+dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/prcp_window_all_years_late.csv.gz")
+
+```
+
+
+
+### TMEAN
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO POR ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) return(NULL)
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  out_file <- file.path(out_dir, paste0("tmean_window_", yr, ".csv.gz"))
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+
+    e <- min(s + chunk_size - 1, n)
+    cat("Chunk:", s, "-", e, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    ext <- terra::extract(r_sub, pts_v, xy = TRUE, ID = FALSE)
+    ext_dt <- as.data.table(ext)
+
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "tmean",
+      variable.factor = FALSE
+    )
+
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # Kelvin -> Celsius (IMPORTANTE)
+    # =====================================================
+    if (nrow(long_dt) > 0) {
+      media_tmean <- mean(long_dt$tmean, na.rm = TRUE)
+
+      if (!is.na(media_tmean) && media_tmean > 100) {
+        long_dt[, tmean := tmean - 273.15]
+      }
+    }
+
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, tmean, allowed_date, PD85
+    )]
+
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file)
+    )
+
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc()
+  }
+
+  return(out_file)
+}
+
+# =========================================================
+# 5) LOOP POR ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr, pts_year, r, dates_all, layer_names,
+    out_dir, chunk_size
+  )
+
+  rm(pts_year)
+  gc()
+}
+
+# =========================================================
+# 6) JUNTAR TUDO
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "tmean_window_all_years_late.csv.gz")
+
+if (length(valid_files) > 0) {
+
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+
+    dt_tmp <- fread(f)
+
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file)
+    )
+
+    rm(dt_tmp)
+    gc()
+  }
+
+  cat("Arquivo final salvo em:", final_file, "\n")
+}
+```
+
+```{r}
+library(data.table)
+
+dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly/tmean_window_all_years_late.csv.gz")
+
+
+```
+### RH
+```{r}
+# =========================================================
+# 0) PACOTES
+# =========================================================
+library(terra)
+library(data.table)
+library(lubridate)
+
+# =========================================================
+# 1) ENTRADAS
+# =========================================================
+#nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2012_2025.nc"
+nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2005_2025.nc"
+out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly"
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ajuste conforme sua RAM
+chunk_size <- 5000
+
+# =========================================================
+# 2) PREPARAR p_states
+# =========================================================
+p_states_dt <- as.data.table(p_states)
+
+p_states_dt[, allowed_date := as.Date(allowed_date)]
+p_states_dt[, PD85         := as.Date(PD85)]
+p_states_dt[, pt_id        := .I]
+p_states_dt[, year_allowed := year(allowed_date)]
+
+p_states_dt <- p_states_dt[
+  !is.na(longitude) & !is.na(latitude) &
+  !is.na(allowed_date) & !is.na(PD85)
+]
+
+p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
+
+# =========================================================
+# 3) LER O NetCDF
+# =========================================================
+r <- rast(nc_path)
+
+dates_all <- as.Date(time(r))
+if (all(is.na(dates_all))) {
+  stop("Datas não encontradas no NetCDF.")
+}
+
+layer_names <- names(r)
+r_crs <- crs(r)
+
+# =========================================================
+# 4) FUNÇÃO POR ANO
+# =========================================================
+process_year <- function(yr, pts_year, r, dates_all, layer_names,
+                         out_dir, chunk_size = 5000) {
+
+  cat("\n=============================\n")
+  cat("Processando ano:", yr, "\n")
+
+  date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
+  date_fim <- max(pts_year$PD85, na.rm = TRUE)
+
+  idx <- which(dates_all >= date_ini & dates_all <= date_fim)
+
+  if (length(idx) == 0) return(NULL)
+
+  r_sub <- r[[idx]]
+  dates_sub <- dates_all[idx]
+  layer_names_sub <- layer_names[idx]
+
+  out_file <- file.path(out_dir, paste0("rh_window_", yr, ".csv.gz"))
+  if (file.exists(out_file)) file.remove(out_file)
+
+  n <- nrow(pts_year)
+  starts <- seq(1, n, by = chunk_size)
+
+  for (s in starts) {
+
+    e <- min(s + chunk_size - 1, n)
+    cat("Chunk:", s, "-", e, "\n")
+
+    pts_chunk <- pts_year[s:e]
+
+    pts_v <- vect(
+      pts_chunk,
+      geom = c("longitude", "latitude"),
+      crs  = "EPSG:4326"
+    )
+
+    if (!is.na(r_crs) && r_crs != crs(pts_v)) {
+      pts_v <- project(pts_v, r_crs)
+    }
+
+    ext <- terra::extract(r_sub, pts_v, xy = TRUE, ID = FALSE)
+    ext_dt <- as.data.table(ext)
+
+    ext_dt[, pt_id := pts_chunk$pt_id]
+
+    long_dt <- melt(
+      ext_dt,
+      id.vars = c("x", "y", "pt_id"),
+      variable.name = "layer",
+      value.name = "rh",
+      variable.factor = FALSE
+    )
+
+    long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
+
+    setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
+
+    meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
+    long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
+
+    long_dt <- long_dt[
+      date >= allowed_date & date <= PD85
+    ]
+
+    long_dt[, dpp := as.integer(date - allowed_date)]
+    long_dt <- long_dt[dpp >= 0 & dpp <= 85]
+
+    # =====================================================
+    # CHECAGEM OPCIONAL DE UNIDADE
+    # =====================================================
+    # Se RH estiver em fração (0-1), converte para %
+    if (nrow(long_dt) > 0) {
+      media_rh <- mean(long_dt$rh, na.rm = TRUE)
+
+      if (!is.na(media_rh) && media_rh <= 1) {
+        long_dt[, rh := rh * 100]
+      }
+    }
+
+    long_dt <- long_dt[, .(
+      pt_id, longitude, latitude, date, dpp, rh, allowed_date, PD85
+    )]
+
+    fwrite(
+      long_dt,
+      file = out_file,
+      append = file.exists(out_file)
+    )
+
+    rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
+    gc()
+  }
+
+  return(out_file)
+}
+
+# =========================================================
+# 5) LOOP POR ANO
+# =========================================================
+years_to_run <- sort(unique(p_states_dt$year_allowed))
+
+files_created <- vector("list", length(years_to_run))
+names(files_created) <- years_to_run
+
+for (yr in years_to_run) {
+
+  pts_year <- p_states_dt[year_allowed == yr]
+
+  files_created[[as.character(yr)]] <- process_year(
+    yr, pts_year, r, dates_all, layer_names,
+    out_dir, chunk_size
+  )
+
+  rm(pts_year)
+  gc()
+}
+
+# =========================================================
+# 6) JUNTAR TUDO
+# =========================================================
+valid_files <- unlist(files_created)
+valid_files <- valid_files[file.exists(valid_files)]
+
+final_file <- file.path(out_dir, "rh_window_all_years_late.csv.gz")
+
+if (length(valid_files) > 0) {
+
+  if (file.exists(final_file)) file.remove(final_file)
+
+  for (f in valid_files) {
+
+    dt_tmp <- fread(f)
+
+    fwrite(
+      dt_tmp,
+      file = final_file,
+      append = file.exists(final_file)
+    )
+
+    rm(dt_tmp)
+    gc()
+  }
+
+  cat("Arquivo final salvo em:", final_file, "\n")
+}
+```
+
+```{r}
+library(data.table)
+
+dt_rh <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly/rh_window_all_years_late.csv.gz")
+
+max(dt_rh$PD85)
+```
+
+
+```{r}
+
+#RAIN
+
+dt_rain[, year_allowed := year(allowed_date)]
+
+dt_rain_clean <- dt_rain[
+  ,
+  .(prcp = mean(prcp, na.rm = TRUE)),
+  by = .(pt_id, longitude,latitude,date,dpp,allowed_date,PD85,year_allowed)
+]
+
+dt_rain = dt_rain_clean
+
+check_rain <- dt_rain_clean[
+  ,
+  .(
+    n = .N,
+    min_dpp = min(dpp),
+    max_dpp = max(dpp),
+    n_dpp = uniqueN(dpp)
+  ),
+  by = .(pt_id,year_allowed)
+]
+
+check_rain[n != 86 | min_dpp != 0 | max_dpp != 85 | n_dpp != 86]
+
+# TMAX
+
+dt_tmax[, year_allowed := year(allowed_date)]
+
+dt_tmax_clean <- dt_tmax[
+  ,
+  .(tmax = mean(tmax, na.rm = TRUE)),
+  by = .(pt_id, longitude,latitude,date,dpp,allowed_date,PD85,year_allowed)
+]
+
+dt_tmax = dt_tmax_clean
+
+check_tmax <- dt_tmax_clean[
+  ,
+  .(
+    n = .N,
+    min_dpp = min(dpp),
+    max_dpp = max(dpp),
+    n_dpp = uniqueN(dpp)
+  ),
+  by = .(pt_id,year_allowed)
+]
+
+check_tmax[n != 86 | min_dpp != 0 | max_dpp != 85 | n_dpp != 86]
+
+
+# TMEAN
+
+dt_tmean[, year_allowed := year(allowed_date)]
+
+dt_tmean_clean <- dt_tmean[
+  ,
+  .(tmean = mean(tmean, na.rm = TRUE)),
+  by = .(pt_id, longitude,latitude,date,dpp,allowed_date,PD85,year_allowed)
+]
+
+dt_tmean = dt_tmean_clean
+
+check_tmean <- dt_tmean_clean[
+  ,
+  .(
+    n = .N,
+    min_dpp = min(dpp),
+    max_dpp = max(dpp),
+    n_dpp = uniqueN(dpp)
+  ),
+  by = .(pt_id,year_allowed)
+]
+
+check_tmean[n != 86 | min_dpp != 0 | max_dpp != 85 | n_dpp != 86]
+
+
+# RH
+
+dt_rh[, year_allowed := year(allowed_date)]
+
+dt_rh_clean <- dt_rh[
+  ,
+  .(rh = mean(rh, na.rm = TRUE)),
+  by = .(pt_id, longitude,latitude,date,dpp,allowed_date,PD85,year_allowed)
+]
+
+dt_rh = dt_rh_clean
+
+check_rh <- dt_rh_clean[
+  ,
+  .(
+    n = .N,
+    min_dpp = min(dpp),
+    max_dpp = max(dpp),
+    n_dpp = uniqueN(dpp)
+  ),
+  by = .(pt_id,year_allowed)
+]
+
+check_rh[n != 86 | min_dpp != 0 | max_dpp != 85 | n_dpp != 86]
+
+
+dt_rain
+dt_tmax
+dt_tmean
+dt_rh
+```
+
+
+
+```{r}
+
+p_state_overall = dt_rain
+p_state_overall$tmax = dt_tmax$tmax
+p_state_overall$tmean = dt_tmean$tmean
+p_state_overall$rh = dt_rh$rh
+
+
+max(p_state_overall$PD85)
+max(p_state_overall$allowed_date)
+
+```
+
+
+### DLNM
+```{r}
+p_state_overall = p_state_overall %>% 
+  select(pt_id, year_allowed,longitude,latitude, date, dpp, tmax, tmean, rh, prcp)
+
+colnames(p_state_overall) = c("pixel_id", "year","longitude", "latitude", "date","dpp",
+                              "tmax", "tmean", "rh", "rain")
+
+
+es <- function(T) { 0.6108 * exp((17.27 * T) / (T + 237.3)) }
+p_state_overall <- p_state_overall |>
+  mutate(vpd = es(tmean) * (1 - rh / 100))
+
+#wx_use = wx_use %>% 
+  #filter(dpp >=15)
+
+
+p_state_overall <- p_state_overall |>
+  arrange(pixel_id, date) |>
+  group_by(pixel_id) |>
+  mutate(rain_cum = cumsum(rain)) |>
+  ungroup()
+
+```
+
+```{r}
+p_state_overall %>%
+  summarise(
+    tmax_na = sum(!is.finite(tmax)),
+    rain_na = sum(!is.finite(rain_cum)),
+    vpd_na  = sum(!is.finite(vpd))
+  )
+
+max(p_state_overall$date)
+
+```
+
+
+
+
+
+### All variables
+```{r}
+# --- Dados observados ---
+wx_use      # dados longos observados
+dat         # banco final do modelo (com cb_*)
+fit_sel     # modelo glmmTMB ajustado
+
+# --- Dados ERA5 ---
+p_state_overall   # ERA5 limpo, alinhado, com dpp = 0:85 completos
+
+# --- Parâmetros do modelo ---
+VARS       <- c("tmax", "rain_cum", "vpd")
+LAG_MAX    <- 85
+DF_VAR     <- 4      # ou o valor que você usou
+DF_LAG     <- 4
+SEPARATOR  <- 10     # exatamente o mesmo do ajuste
+
+
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(dlnm)
+library(ggplot2)
+
+# =========================================================
+# 1) CRIAR cb_templates (A PARTIR DO OBSERVADO)
+# =========================================================
+
+build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
+
+  ids <- unique(wx_long$epi_id)
+  out <- vector("list", length(ids))
+
+  for (i in seq_along(ids)) {
+
+    v <- wx_long %>%
+      filter(epi_id == ids[i]) %>%
+      arrange(dpp) %>%
+      pull(.data[[var]])
+
+    out[[i]] <- c(v, rep(NA_real_, sep_n))
+  }
+
+  unlist(out)
+}
+
+cb_templates <- list()
+
+for (v in VARS) {
+
+  x_pool <- build_pooled_series(wx_use, v, sep_n = SEPARATOR)
+
+  cb_templates[[v]] <- crossbasis(
+    x_pool,
+    lag    = LAG_MAX,
+    argvar = list(fun = "ns", df = DF_VAR),
+    arglag = list(fun = "ns", df = DF_LAG)
+  )
+}
+
+# =========================================================
+# 2) PREPARAR ERA5 COMO "EPIDEMIAS"
+# =========================================================
+
+era5_long <- p_state_overall %>%
+  mutate(
+    epi_id = paste(pixel_id, year, sep = "_")
+  ) %>%
+  arrange(epi_id, dpp)
+
+era5_long <- era5_long %>%
+  group_by(epi_id) %>%
+  arrange(dpp) %>%
+  tidyr::fill(tmax, rain, tmean, rh, .direction = "down") %>%
+  ungroup()
+
+# =========================================================
+# 3) FUNÇÕES PARA GERAR cb_* DO ERA5
+# =========================================================
+
+extract_last_cb_row <- function(x, cb_template) {
+
+  # garantir vetor numérico
+  x <- as.numeric(x)
+
+  # remover NA
+  x <- x[is.finite(x)]
+
+  # checar comprimento mínimo
+  if (length(x) < (LAG_MAX + 1)) {
+    return(rep(NA_real_, ncol(cb_template)))
+  }
+
+  cb <- dlnm::crossbasis(
+    x,
+    lag    = LAG_MAX,
+    argvar = attr(cb_template, "argvar"),
+    arglag = attr(cb_template, "arglag")
+  )
+
+  as.numeric(cb[length(x), ])
+}
+
+build_design_for_var <- function(wx_long, var, cb_template) {
+
+  X <- wx_long %>%
+    group_by(epi_id) %>%
+    summarise(
+      cb = list(extract_last_cb_row(.data[[var]], cb_template)),
+      .groups = "drop"
+    )
+
+  p  <- length(X$cb[[1]])
+  nm <- paste0("cb_", var, "_", seq_len(p))
+
+  X %>%
+    mutate(cb = lapply(cb, setNames, nm)) %>%
+    unnest_wider(cb)
+}
+
+# =========================================================
+# 4) GERAR cb_* PARA O ERA5
+# =========================================================
+
+X_era5_list <- map(
+  VARS,
+  ~ build_design_for_var(
+      era5_long,
+      .x,
+      cb_templates[[.x]]
+    )
+)
+
+X_era5 <- reduce(X_era5_list, left_join, by = "epi_id")
+
+meta <- era5_long %>%
+  distinct(epi_id, pixel_id, longitude, latitude, year)
+
+X_era5 <- left_join(meta, X_era5, by = "epi_id")
+
+X_era5 <- X_era5 %>%
+  filter(if_all(starts_with("cb_"), is.finite))
+
+# =========================================================
+# 5) PROJETAR NO MODELO DLNM
+# =========================================================
+
+fml_rhs <- delete.response(terms(fit_sel))
+Xmat    <- model.matrix(fml_rhs, data = X_era5)
+beta    <- fixef(fit_sel)$cond
+eta     <- drop(Xmat %*% beta)
+
+X_era5 <- X_era5 %>%
+  mutate(mu = plogis(eta))
+
+# =========================================================
+# 6) EFEITO RELATIVO (PIXEL × ANO)
+# =========================================================
+
+effects_era5 <- X_era5 %>%
+  group_by(pixel_id, longitude, latitude, year) %>%
+  summarise(mu_mean = mean(mu), .groups = "drop")
+
+mu_ref <- mean(effects_era5$mu_mean)
+
+effects_era5 <- effects_era5 %>%
+  mutate(
+    RR        = mu_mean / mu_ref,
+    PERC_mean = (RR - 1) * 100
+  )
+
+# =========================================================
+# 7) GRÁFICOS
+# =========================================================
+
+# Distribuição do risco
+ggplot(effects_era5, aes(RR)) +
+  geom_histogram(bins = 40, fill = "steelblue", color = "black") +
+  theme_bw() +
+  labs(x = "Relative Risk", y = "Frequency")
+
+# Série temporal média
+effects_era5 %>%
+  group_by(year) %>%
+  summarise(RR_mean = mean(RR)) %>%
+  ggplot(aes(year, RR_mean)) +
+  geom_line() +
+  geom_point() +
+  theme_bw()
+
+#writexl::write_xlsx(effects_era5,"data/effects_era5.xlsx")
+
+
+effects_era5 %>% 
+  #filter(!year == 2012) %>% 
+ggplot(
+  #filter(effects_era5, year == yr),
+  aes(longitude, latitude, fill = PERC_mean)) +
+  geom_raster() +
+  coord_equal() +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  theme_bw()+
+  facet_wrap(~year)
+
+#sd(effects_era5$mu_mean)
+```
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(sf)
+library(geobr)
+library(ggplot2)
+library(lme4)
+# =========================================================
+# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
+#    >>> Edite esta linha <<<
+# =========================================================
+states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
+# Exemplo acima — troque pelas suas UFs
+
+# --- ALTERNATIVA (se preferir remover em vez de manter):
+# states_remove <- c("PA","TO","MA","PI","CE","BA")
+# (aí, mais abaixo, use !%in% em vez de %in%)
+
+# =========================================================
+# 2) Ler estados (geobr) e garantir CRS
+# =========================================================
+br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
+  st_transform(4326)
+
+# Filtrar SOMENTE os estados desejados
+br_states_use <- br_states %>%
+  filter(abbrev_state %in% states_keep)
+
+# --- ALTERNATIVA (se estiver usando states_remove):
+# br_states_use <- br_states %>%
+#   filter(!abbrev_state %in% states_remove)
+
+# Polígono máscara (dissolve)
+mask_states <- st_union(br_states_use)
+
+# =========================================================
+# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
+#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# =========================================================
+tmax_mean_grid_clean <- effects_era5
+
+# Converter pixels (lon/lat) para sf
+grid_sf <- st_as_sf(
+  tmax_mean_grid_clean,
+  coords = c("longitude", "latitude"),
+  crs = 4326,
+  remove = FALSE
+)
+
+# =========================================================
+# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
+# =========================================================
+grid_sf_clip <- st_filter(grid_sf, mask_states)
+
+tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
+
+# =========================================================
+# 5) Plot final (somente estados escolhidos)
+# =========================================================
+p_RR <- tmax_mean_grid_clip %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = PERC_mean)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  facet_wrap(~year, nrow = 4)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_text(size = 12, face = "bold"),,
+       axis.title = element_text(face = "bold"),
+       axis.text = element_text(size = 8),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+p_RR
+
+#ggsave("map2.png", dpi = 600, height =6,width = 10, bg = "white")
+
+ggsave("fig2/map_all_late.png", dpi = 600, height =10,width = 12, bg = "white")
+```
+
+
+```{r}
+
+tmax_mean_grid_clip_late = tmax_mean_grid_clip %>% 
+  group_by(latitude,longitude) %>% 
+  summarise(
+    PERC = mean(PERC_mean),
+    sd = sd(PERC_mean, na.rm = TRUE)
+  )
+
+tmax_mean_grid_clip_late$period = "Late"
+
+p_RR_late <- tmax_mean_grid_clip_late %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = sd)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 50) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+ # facet_wrap(~year, nrow = 4)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_text(size = 12, face = "bold"),,
+       axis.title = element_text(face = "bold"),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+p_RR_late
+
+
+```
+
+
+```{r}
+grid_all = rbind(tmax_mean_grid_clip_ea,tmax_mean_grid_clip_int,tmax_mean_grid_clip_late)
+
+
+PERC_all= grid_all %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = PERC)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 0) +
+  labs(
+    x = "",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+ facet_wrap(~period, nrow = 1)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_text(size = 12, face = "bold"),,
+       axis.title = element_text(face = "bold"),
+       axis.text.x = element_blank(),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+library(viridis)
+
+SD_all= grid_all %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = sd)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+ # scale_fill_distiller(
+  #  palette = "OrRd",
+   # direction = 1) +
+  #scale_fill_gradient2(low = "darkgreen", mid = "white", high = "firebrick", midpoint = 50) +
+  scale_fill_viridis(option = "H")+
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "SD (%)") +
+  theme_bw() +
+ facet_wrap(~period, nrow = 1)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       #axis.text.x = element_blank(),
+       strip.text = element_blank(),
+       axis.title = element_text(face = "bold"),
+       #axis.text.x = element_blank(),
+       legend.title = element_text(face = "bold"))+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip_int$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+PERC_all/SD_all
+
+ggsave("fig2/PERC_SD_all.png", dpi = 600, height =5.5,width = 9, bg = "white")
+```
+
+
+```{r}
+# =========================================================
+# 0) Pacotes
+# =========================================================
+library(dplyr)
+library(sf)
+library(geobr)
+library(ggplot2)
+
+# =========================================================
+# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
+#    >>> Edite esta linha <<<
+# =========================================================
+states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
+# Exemplo acima — troque pelas suas UFs
+
+# --- ALTERNATIVA (se preferir remover em vez de manter):
+# states_remove <- c("PA","TO","MA","PI","CE","BA")
+# (aí, mais abaixo, use !%in% em vez de %in%)
+
+# =========================================================
+# 2) Ler estados (geobr) e garantir CRS
+# =========================================================
+br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
+  st_transform(4326)
+
+# Filtrar SOMENTE os estados desejados
+br_states_use <- br_states %>%
+  filter(abbrev_state %in% states_keep)
+
+# --- ALTERNATIVA (se estiver usando states_remove):
+# br_states_use <- br_states %>%
+#   filter(!abbrev_state %in% states_remove)
+
+# Polígono máscara (dissolve)
+mask_states <- st_union(br_states_use)
+
+# =========================================================
+# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
+#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# =========================================================
+
+p_state_all = p_state_overall %>% 
+  group_by(pixel_id,longitude,latitude) %>% 
+  summarise(
+    tmax = mean(tmax, na.rm = T),
+    vpd = mean(vpd, na.rm = T),
+    rain = mean(rain_cum, na.rm = T)
+  )
+
+
+p_state_overall_clean <- p_state_all %>%
+  filter(
+    !is.na(longitude),
+    !is.na(latitude),
+    !is.na(vpd),
+    !is.na(tmax),
+    !is.na(rain)
+  )
+
+
+
+# =========================================================
+# 5) Plot final (somente estados escolhidos)
+# =========================================================
+p_tmax <- p_state_overall_clean %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = tmax)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "OrRd",
+    direction = 1) +
+  labs(
+    x = "",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  #facet_wrap(~year, nrow = 2)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       axis.text.x = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"),
+       legend.position = "top")+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+p_rain <- p_state_overall_clean %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = rain)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "Blues",
+    direction = 1) +
+  labs(
+    x = "",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  #facet_wrap(~year, nrow = 2)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       axis.text.x = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"),
+       legend.position = "top")+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+p_rh <- p_state_overall_clean %>% 
+  #filter(!year == 2012) %>% 
+  ggplot(aes(x = longitude, y = latitude, fill = vpd)
+) +
+  geom_raster(interpolate = FALSE) +
+  geom_sf(
+    data = br_states_use,
+    fill = NA,
+    color = "black",
+    linewidth = 0.1,
+    inherit.aes = FALSE
+  ) +
+  coord_sf(
+    xlim = st_bbox(mask_states)[c("xmin","xmax")],
+    ylim = st_bbox(mask_states)[c("ymin","ymax")],
+    expand = FALSE
+  ) +
+  scale_fill_distiller(
+    palette = "YlGn",
+    direction = 1) +
+  labs(
+    x = "Longitude",
+    y = "Latitude",
+    fill = "RR (%)") +
+  theme_bw() +
+  #facet_wrap(~year, nrow = 4)+
+  theme(plot.title = element_text(hjust = 0.5),
+       strip.background = element_blank(),
+       strip.text = element_text(size = 14, face = "bold"),
+       legend.position = "top")+
+scale_x_continuous(
+  breaks = seq(
+    floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
+    by = 10
+  )
+)
+
+
+
+(p_tmax+p_rain+p_rh) 
+
+library(ggpubr)
+   ggarrange(
+    p_tmax, p_rain, p_rh,
+    ncol = 1, nrow = 3,
+    labels = c("(a)", "(b)", "(c)"), 
+    font.label = list(color = "black", face = "bold", size = 14),
+    align = "v",               
+    heights = c(0.6, 0.6, 0.6)        
+  )
+  
+#ggsave("map.png", dpi = 600, height =12,width = 10, bg = "white")
+```
 
