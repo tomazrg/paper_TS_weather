@@ -4718,6 +4718,13 @@ sev_plot = map %>%
 ```
 
 ```{r}
+wx_use2 <- wx_use2 %>%
+  mutate(
+    year = paste0(year.x, "/", year.x + 1)
+  )
+```
+
+```{r}
 year_plot= map %>% 
 dplyr::group_by(year) %>% 
   summarise(
