@@ -4541,11 +4541,17 @@ wx_use2 %>%
   filter(state.x == "TO")
 
 wx_use2$year.x = wx_use2$year.x-1
+
+wx_use2 <- wx_use2 %>%
+  mutate(
+    year = paste0(year.x, "/", year.x + 1)
+  )
+
 ```
 
 ```{r}
 vpd_state = wx_use2 %>% 
-  ggplot(aes(dpp,vpd, group = as.factor(year.x), color = as.factor(year.x)))+
+  ggplot(aes(dpp,vpd, group = as.factor(year), color = as.factor(year)))+
   geom_smooth(se = F)+
   facet_wrap(~state.x, ncol = 3)+
   theme_bw()+
@@ -4568,7 +4574,7 @@ ggsave("fig/vpd_state.png", dpi = 600, width = 14, height = 10)
 
 ```{r}
 tmax_state = wx_use2 %>% 
-  ggplot(aes(dpp,tmax, group = as.factor(year.x), color = as.factor(year.x)))+
+  ggplot(aes(dpp,tmax, group = as.factor(year), color = as.factor(year)))+
   geom_smooth(se = F)+
   facet_wrap(~state.x, ncol = 3)+
   theme_bw()+
@@ -4591,7 +4597,7 @@ ggsave("fig/tmax_state.png", dpi = 600, width = 14, height = 10)
 
 ```{r}
 rain_state = wx_use2 %>% 
-  ggplot(aes(dpp,rain_cum, group = as.factor(year.x), color = as.factor(year.x)))+
+  ggplot(aes(dpp,rain_cum, group = as.factor(year), color = as.factor(year)))+
   geom_smooth(se = F)+
   facet_wrap(~state.x, ncol = 3)+
   theme_bw()+
