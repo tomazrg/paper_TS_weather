@@ -4718,9 +4718,12 @@ sev_plot = map %>%
 ```
 
 ```{r}
-wx_use2 <- wx_use2 %>%
+map <- map %>%
   mutate(
-    year = paste0(year.x, "/", year.x + 1)
+    year = year - 1
+  ) %>% 
+  mutate(
+    year = paste0(year, "/", year + 1)
   )
 ```
 
@@ -4730,14 +4733,14 @@ dplyr::group_by(year) %>%
   summarise(
    mean_sev = mean(mean_sev)
   ) %>% 
-  ggplot(aes(as.factor(year-1),mean_sev))+
+  ggplot(aes(as.factor(year),mean_sev))+
   geom_bar(stat = "identity" ,fill = "#002f61")+
   ggthemes::theme_few()+
   labs(x = "Year",
        y = "Severity (%)")+
   theme(text = element_text(size = 12),
         axis.title = element_text(face = "bold"),
-        axis.text.x = element_text(angle = 45, vjust = 0.5))
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust = 0.9))
 
 year_plot
 ```
