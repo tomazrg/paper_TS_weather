@@ -694,7 +694,16 @@ qq_plot = ggplot(df, aes(x = theoretical, y = observed)) +
 ```
 
 ```{r}
-model|qq_plot/hist
+(model|qq_plot/hist)+
+  plot_annotation(
+    tag_levels = "a",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.tag.position = c(0, 1) 
+  )
 
 ggsave("fig/model.png", dpi = 600, width = 8, height = 6)
 ```
@@ -1205,8 +1214,16 @@ vpd_RR_first
 ```{r}
 library(patchwork)
 
-tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second
-
+(tmean_RR_first/tmean_RR_second|rain_RR_first/rain_RR_second|vpd_RR_first/vpd_RR_second)+
+  plot_annotation(
+    tag_levels = "a",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.tag.position = c(0, 1) 
+  )
 
 ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
 ```
@@ -2460,7 +2477,16 @@ vpd_movel
 ```{r}
 #tmean_movel/rain_movel/vpd_movel|sev_tmean/sev_rain/sev_vpd
 
-(tmean_movel+rain_movel+vpd_movel)/(freq_tmax+freq_rain+freq_vpd)
+(tmean_movel+rain_movel+vpd_movel)/(freq_tmax+freq_rain+freq_vpd)+
+  plot_annotation(
+    tag_levels = "a",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.tag.position = c(0, 1) 
+  )
 
 ggsave("fig/RR_movel.png", dpi = 600, width = 10, height = 6)
 
@@ -2848,8 +2874,16 @@ print(p_heat_diff_vpd)
 
 ```{r}
 
-(p_heat_diff_tmax/p_heat_diff_rain/p_heat_diff_vpd)|(sev_tmax/sev_rain/sev_vpd)
-
+((p_heat_diff_tmax/p_heat_diff_rain/p_heat_diff_vpd)|(sev_tmax/sev_rain/sev_vpd))+
+  plot_annotation(
+    tag_levels = "a",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.tag.position = c(0, 1) 
+  )
 
 ggsave("fig/delta_severity.png", dpi = 600, width = 10, height = 8)
 
@@ -7027,7 +7061,7 @@ p_RR
 
 #ggsave("map2.png", dpi = 600, height =6,width = 10, bg = "white")
 
-ggsave("fig2/map_all_early.png", dpi = 600, height =10,width = 12, bg = "white")
+ggsave("fig/map_all_early.png", dpi = 600, height =10,width = 12, bg = "white")
 ```
 
 
@@ -8778,7 +8812,7 @@ p_RR
 
 #ggsave("map2.png", dpi = 600, height =6,width = 10, bg = "white")
 
-ggsave("fig2/map_all_intermediate.png", dpi = 600, height =10,width = 12, bg = "white")
+ggsave("fig/map_all_intermediate.png", dpi = 600, height =10,width = 12, bg = "white")
 ```
 
 
@@ -10530,7 +10564,7 @@ scale_x_continuous(
 p_RR
 
 
-ggsave("fig2/map_all_late.png", dpi = 600, height =10,width = 12, bg = "white")
+ggsave("fig/map_all_late.png", dpi = 600, height =10,width = 12, bg = "white")
 ```
 
 
@@ -10683,9 +10717,18 @@ scale_x_continuous(
   )
 )
 
-PERC_all/SD_all
+(PERC_all / SD_all) +
+  plot_annotation(
+    tag_levels = "a",
+    tag_prefix = "(",
+    tag_suffix = ")"
+  ) &
+  theme(
+    plot.tag = element_text(face = "bold", size = 14),
+    plot.tag.position = c(0, 1) 
+  )
 
-ggsave("fig2/PERC_SD_all.png", dpi = 600, height =5.5,width = 9, bg = "white")
+ggsave("fig/PERC_SD_all.png", dpi = 600, height =5.5,width = 9, bg = "white")
 ```
 
 
@@ -11056,7 +11099,7 @@ fig_maps
 
 # salvar
 ggsave(
-  filename = "fig2/map_all_period.png",
+  filename = "fig/map_all_period.png",
   plot = fig_maps,
   dpi = 600,
   width = 9,
