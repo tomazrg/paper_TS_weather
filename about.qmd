@@ -5080,6 +5080,8 @@ print(p)
 
 ggsave("fig/severity_scenarios.png", dpi = 600, width = 8, height = 6)
 ```
+
+
 ```{r}
 weather_data <- epi %>%
   mutate(
@@ -5255,6 +5257,8 @@ ggplot() +
   coord_sf(expand = FALSE) +
   theme_minimal()
 ```
+
+
 ```{r}
 p_states = p_states %>% 
   mutate(
