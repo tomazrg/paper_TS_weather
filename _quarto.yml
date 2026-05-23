@@ -9,7 +9,7 @@ website:
       - href: index.qmd
         text: "<i class='bi bi-book-half'></i> About"
       - href: about.qmd
-        text: "<i class='bi bi-bar-chart-fill'></i> Framework modeling"
+        text: "<i class='bi bi-bar-chart-fill'></i> Modeling framework"
     right:
       - href: https://github.com/tomazrg/paper_TS_weather
         text: "<i class='bi bi-github'></i> GitHub"

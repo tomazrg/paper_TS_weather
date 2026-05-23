@@ -1,5 +1,5 @@
 ---
-title: "Weather factors driving Target Spot epidemics in Soybean: a Distributed Lag Non-linear Model Approach"
+title: "Exposure–Lag Responses of Soybean Target Spot to Climatic Proxies: A Distributed Lag Nonlinear Modeling Approach"
 format:
   html:
     toc: true
