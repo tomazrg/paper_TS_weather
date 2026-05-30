@@ -42,7 +42,6 @@ p_states <- p_states %>%
 
 ```
 
-
 ```{r}
 
 
@@ -154,7 +153,6 @@ ggplot() +
   coord_sf(expand = FALSE) +
   theme_minimal()
 ```
-
 
 ```{r}
 p_states = p_states %>% 
@@ -324,7 +322,6 @@ print(p)
 
 ```
 
-
 ```{r}
 # =========================================================
 # 0) Pacotes
@@ -425,35 +422,63 @@ print(p)
 
 ggsave("fig/tmax.png", dpi = 600)
 ```
+
 ```{r}
 osmar = read_xlsx("data/osmar.xlsx")
 
 osmar = osmar %>% 
-  filter(!Bacteria == "Pc")
+  filter(!Bacteria == "Pc") %>% 
+  filter(!Bacteria == "Controle")
   
-osmar %>%  
+osmar$log_dose = log10(osmar$Dose)
+
+b01 = osmar %>% 
+ # filter(Bacteria == "Kitasatospora sp. 2AE") %>% 
+ # filter(Bacteria == "Streptomyces sp. 4L") %>% 
+  #filter(Bacteria == "Kribbella sp. 5N")
+  filter(Bacteria == "Streptomyces sp. 6O")
+
+
+unique(osmar$Bacteria)
+
+model_osmar = lm(Galhas_g ~ Dose, data = osmar)
+summary(model_osmar)
+confint(model_osmar)
+
+ovos = osmar %>%  
   #filter(Tratamento == "Kribbella sp. 5N_D3") %>% 
-  ggplot(aes(Galhas_g,Ovos_g))+
+  ggplot(aes(log10(Dose),Ovos_g))+
   geom_jitter(size = 2, width = .5)+
   geom_smooth(method = "lm", se = F)+
   theme_bw()+
-  labs(x = "Número de galhas",
-       y = "Número de ovos")+
-  theme(text = element_text(size = 14, face = "bold"))
+  facet_grid(~Bacteria)+
+  labs(x = "",
+       y = expression("Número de ovos " * g^{-1}))+
+  theme(text = element_text(size = 14, face = "bold"),
+        axis.text.x = element_blank(),
+        axis.title = element_text(face = "bold"))
 
-ggsave("fig/ovos_galhas.png", dpi = 600)
-
-osmar %>%  
+galhas = osmar %>%  
   #filter(Tratamento == "Kribbella sp. 5N_D3") %>% 
-  ggplot(aes(Dose,Ovos_g))+
+  ggplot(aes(log10(Dose),Galhas_g))+
   geom_jitter(size = 2, width = .5)+
   geom_smooth(method = "lm", se = F)+
   theme_bw()+
+  facet_grid(~Bacteria)+
   labs(x = "Dose",
-       y = "Número de ovos")+
-  theme(text = element_text(size = 14, face = "bold"))
-  
-ggsave("fig/dose.png", dpi = 600)
+       y = expression("Número de galhas " * g^{-1}))+
+   theme(text = element_text(size = 14, face = "bold"),
+        axis.title = element_text(face = "bold"))
+
+library(cowplot)
+
+plot_grid(ovos,galhas, nrow = 2)
+
+ovos/galhas
+
+
+
+ggsave("fig/dose.png", dpi = 600, height = 6, width = 12)
 
   unique(osmar$Bacteria)
   
@@ -487,10 +512,10 @@ cld_emm
 
 ```
 
-
 # Severity (weather movel)
 
 ### All period
+
 ```{r}
 # --------- 0) utilitários ----------
 get_cb_names <- function(dat, var){
@@ -591,8 +616,6 @@ combined_data$sev <- apply(
 gc()
 ```
 
-
-
 ```{r}
 get_cp_matfit <- function(var, at_vals, cen_val){
   cb <- cb_templates[[var]]
@@ -646,6 +669,7 @@ sev_base
 ```
 
 ### Different phases
+
 ```{r}
 # ============================================================
 # DLNM + glmmTMB(beta) — Simulação por 2 cenários em 2 janelas:
@@ -870,8 +894,8 @@ cat("Severidade prevista (%): ", 100 * sev_pred, "\n")
 
 ```
 
-
 ## Year
+
 ```{r}
 library(dplyr)
 library(purrr)
@@ -1210,7 +1234,6 @@ ggplot(aes(x = as.factor(year), y = delta_RR)) +
 ggsave("fig/marginal_year.png", dpi = 600, bg = "white", height = 8, width = 6)
 ```
 
-
 ```{r}
 summarize_year <- function(curves_by_year, phase = c("vertical","horizontal")) {
   phase <- match.arg(phase)
@@ -1507,6 +1530,7 @@ res_r %>%
   ggplot(aes(at,RR_horizontal))+
   geom_point()
 ```
+
 ```{r}
 curves_by_year_tmean <- rr_by_year_list(
   var = "vpd",
@@ -1539,8 +1563,6 @@ plot_curves_by_year <- function(curves_by_year, var_label, phase="vertical"){
 plot_curves_by_year(curves_by_year_tmean, var_label="Temperature (°C)", phase="horizontal")
 ```
 
-
-
 ```{r}
 # severidade média por ano (ajuste o nome da coluna de resposta)
 sev_year <- dat %>% group_by(year) %>% summarise(sev_mean = mean(sev, na.rm=TRUE))
@@ -1561,6 +1583,7 @@ df_join %>%
   ggplot(aes(AUC_excess,sev_mean))+
   geom_point()
 ```
+
 ```{r}
 wx_summarise1 = wx_use %>% 
   filter(dpp <= 85) %>% 
@@ -1628,6 +1651,7 @@ ggsave("fig/annual_effect_phase.png", dpi = 600, height = 8, width = 12)
 ```
 
 # Discriptive plotting
+
 ```{r}
 wx_summarise = wx_use %>% 
   filter(dpp <= 85) %>% 
@@ -1762,8 +1786,6 @@ rain_plot = ggplot() +
 
 tmean_plot+rain_plot+vpd_plot
 ```
-
-
 
 ```{r}
 lat_plot = epi %>% 
@@ -1970,6 +1992,7 @@ writexl::write_xlsx(wx_win,"data/wx_win.xlsx")
 ```
 
 # Model simulation (OUTRO ARTIGO - DLNM FRAMEWORK - PEGAR ESSE SCRIPT E COLOCAR NO OUTRO REPOSITORIO)
+
 ```{r, echo=TRUE, eval=FALSE}
 library(dplyr)
 library(purrr)
@@ -2158,7 +2181,6 @@ results_df2 %>%
 
 results_df2 = read_xlsx("data/results_df2.xlsx")
 ```
-
 
 # Scenarios simulation (Severity)
 

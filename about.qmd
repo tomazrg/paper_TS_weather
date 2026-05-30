@@ -590,8 +590,8 @@ model = dat2 %>%
   scale_y_continuous(breaks=c(0.00, 0.25, 0.50,0.75), limits = c(0,0.75))+
   theme_bw()+
   coord_cartesian(clip = "off")+
-  labs(x = "Observed (%)",
-       y = "Predicted (%)")+
+  labs(x = "Observed (proportion)",
+       y = "Predicted (proportion)")+
   annotate(
     "text",
     x = -Inf, y = Inf,
@@ -601,7 +601,8 @@ model = dat2 %>%
     size = 3.5,
     fontface = "bold",
     lineheight = 1.05
-  )
+  )+
+  theme(axis.title = element_text(face = "bold"))
 
 
 dat2 = dat2 %>% 
@@ -623,7 +624,8 @@ hist = dat2 %>%
  labs(
     x = "Residual error",
     y = "Frequency"
-  )
+  )+
+  theme(axis.title = element_text(face = "bold"))
 
 ```
 
@@ -688,7 +690,8 @@ qq_plot = ggplot(df, aes(x = theoretical, y = observed)) +
     x = "Theoritical quantis",
     y = "Simulated residues"
   )+
-  theme_bw()
+  theme_bw()+
+  theme(axis.title = element_text(face = "bold"))
 
 
 
@@ -2356,7 +2359,7 @@ grid <- sort(unique(as.numeric(quantile(
 
 # valores desejados para o heatmap (26 a 30 °C)
 #at_vals <- seq(1, 2, length.out = 10000)
-at_vals <- seq(0.66, 1.5, length.out = 10000)
+at_vals <- seq(0.50, 1.5, length.out = 10000)
 
 # ajustar ao range REAL do grid (evita extrapolação)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
@@ -3099,7 +3102,7 @@ dplyr::group_by(year) %>%
   ggplot(aes(as.factor(year),mean_sev))+
   geom_bar(stat = "identity" ,fill = "#002f61")+
   ggthemes::theme_few()+
-  labs(x = "Year",
+  labs(x = "Season",
        y = "Severity (%)")+
   theme(text = element_text(size = 12),
         axis.title = element_text(face = "bold"),
@@ -3117,7 +3120,7 @@ year_plot
   theme(plot.tag = element_text(face = "bold", size = 12), label_x = -0.03, label_y = 1)
 
 
-ggsave("fig/map_sev_year.png", dpi = 600, bg = "white",
+ggsave("fig/map_sev_year2.png", dpi = 600, bg = "white",
        width = 12, height = 8)
 ```
 
