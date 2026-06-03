@@ -4,9 +4,9 @@ message: false
 warning: false
 ---
 
-## Packages, options and parameters
+>This chunk initializes the computational environment and defines the core parameters used throughout the analysis. It specifies the maximum lag window, the flexibility of the exposure–lag relationships, and the set of climatic variables to be analyzed. These parameters determine the structure of the Distributed Lag Non‑Linear Model (DLNM) and ensure consistency across all subsequent steps of the workflow.
 
->This chunk prepares the computational environment and defines the global structural parameters that govern the Distributed Lag Non‑Linear Model (DLNM) and the subsequent inferential model. It does not yet fit a statistical model; instead, it establishes the methodological framework under which the DLNM is constructed and later estimated within a generalized (mixed) model.
+# Packages, options and parameters
 
 ```{r}
 
@@ -24,11 +24,11 @@ warning: false
 
 set.seed(20251218)
 
-# ------------------------------- PARÂMETROS ----------------------------------
-END_DAP   <- 85     # 80, 85 ou 90 (ponto de avaliação, p.ex. ~R6)
-LAG_MAX   <- 85     # lags máximos (dias antes de END_DAP)
-DF_VAR    <- 4      # flexibilidade na dimensão de exposição (ns)
-DF_LAG    <- 4      # flexibilidade na dimensão de lag (ns)
+# ------------------------------- Parameters ----------------------------------
+END_DAP   <- 85     # 85 (disease assessment, ~R6)
+LAG_MAX   <- 85     # maximum lag (days before to END_DAP)
+DF_VAR    <- 4      # flexibility in the exposure dimension (ns)
+DF_LAG    <- 4      # flexibility in the lag dimension (ns)
 SEPARATOR <- LAG_MAX
 
 VARS <- c("tmax","rain_cum","vpd")
@@ -37,9 +37,9 @@ LAG_BAND_A <- 0:40
 LAG_BAND_B <- 41:LAG_MAX
 ```
 
-## Data importation and pre organization
+>This section imports the epidemiological dataset and performs initial preprocessing required for DLNM analysis. Disease severity observations are aligned with their corresponding planting dates, and a unique identifier is created for each epidemic. The data are then filtered to retain only complete observations, ensuring consistency between disease assessments and exposure histories.
 
->To ensure valid inference using a Distributed Lag Non‑Linear Model (DLNM), epidemiological observations and weather time series were first aligned in time and space and filtered to guarantee complete exposure histories. Disease severity was evaluated at a fixed assessment time (END_DAP), corresponding approximately to the R6 growth stage, and each epidemic was linked to its assumed assessment date. Daily weather data were then restricted to the period from planting (day 0) to the assessment day, ensuring that all lagged exposures used in the DLNM were fully observed. Only epidemics with complete daily weather records across the entire lag window were retained, as DLNM estimation requires a continuous exposure history for all lags considered. Vapor pressure deficit (VPD) was derived from mean temperature and relative humidity to represent atmospheric drying demand and leaf wetness persistence, which are epidemiologically more meaningful drivers of foliar disease development than relative humidity alone. A site–year identifier was constructed to capture unobserved spatial and temporal heterogeneity in subsequent mixed‑effects modeling. Finally, because disease severity was modeled using a beta regression, observations equal to 0 or 1 were slightly adjusted to satisfy the distributional assumptions of the beta likelihood. This preprocessing step establishes a consistent epidemiological time origin, guarantees complete lagged exposure information, and produces physically interpretable climatic covariates, thereby providing a sound foundation for constructing DLNM cross‑basis functions and estimating their effects within a generalized mixed modeling framework.
+# Data importation and pre organization
 
 ## ERA5 weather extraction
 ```{r}
@@ -70,6 +70,8 @@ epi_use <- epi |>
 
 epi_use
 ```
+
+>These exploratory summaries describe the distribution of disease severity across years and regions. They provide a preliminary understanding of temporal and spatial variability in the dataset, which is essential for interpreting later modeling results.
 
 ```{r}
 epi_use %>% 
@@ -128,6 +130,7 @@ epi_use %>%
   facet_wrap(~state)+
   theme(axis.text.x = element_text(angle = 45))
 ```
+> This step links each epidemic to its corresponding daily weather series. Climatic variables are derived and transformed to represent biologically meaningful drivers of disease development, including accumulated precipitation and vapor pressure deficit (VPD). The resulting dataset contains complete exposure histories from planting to disease assessment for each epidemic.
 
 ```{r, echo=TRUE, eval=FALSE}
 library(r4pde)
@@ -177,56 +180,7 @@ wx_use = read_xlsx("data/ERA5_weather.xlsx")
 
 ## Templates to cross-basis (shared)
 
-To model delayed and non-linear effects of climatic variables on disease severity, we adopted the Distributed Lag Non-Linear Model (DLNM) framework. Because disease severity is observed only once per epidemic—at a fixed assessment time—while climatic exposures are recorded daily, the DLNM requires a complete and consistently structured exposure history for each epidemic across the entire lag window.
-
-For each climatic variable, daily exposure series were pooled across epidemics and concatenated with artificial separation gaps. These gaps prevent the propagation of lag effects from one epidemic into another, ensuring that temporal dependence is preserved within epidemics but not across them. This pooled representation allows the construction of a single shared cross-basis template per variable, guaranteeing that the same exposure–lag functional form is used for all epidemics.
-
-Cross-basis templates were defined using natural cubic splines in both the exposure and lag dimensions. The degrees of freedom controlling exposure flexibility (`DF_VAR`) and lag flexibility (`DF_LAG`) determine the smoothness and complexity of the response surface but do not estimate any effects at this stage. Instead, these templates define the functional space within which the distributed lag effects are later estimated inside a generalized mixed modeling framework.
-
-By constructing shared cross-basis templates prior to model fitting, this step ensures structural consistency, avoids repeated redefinition of spline geometries, and facilitates epidemiologically interpretable comparisons of climatic effects across lag periods and variables.
-
-Let $i = 1, \dots, N$ index epidemics, and let $t_i$ denote the disease assessment time for epidemic $i$. For a climatic variable $v$ (e.g., rainfall, mean temperature, or vapor pressure deficit), let $x_{iv}(t_i - l)$ represent the exposure at lag $l$, where $l = 0, 1, \dots, L$ and $L$ is the maximum lag considered.
-
-The DLNM assumes that the contribution of variable $v$ to the linear predictor can be written as a smooth bivariate function of exposure and lag:
-
-$$
-f_v(x, l)
-=
-\sum_{k=1}^{K_v}
-\sum_{m=1}^{M_v}
-\beta^{(v)}_{km}
-\, B^{(v)}_k(x)
-\, C^{(v)}_m(l),
-$$
-
-where:
-
--   $B^{(v)}_k(x)$ are spline basis functions for the exposure dimension, with $K_v = \text{DF\_VAR}$,
--   $C^{(v)}_m(l)$ are spline basis functions for the lag dimension, with $M_v = \text{DF\_LAG}$,
--   $\beta^{(v)}_{km}$ are coefficients to be estimated in the inferential model.
-
-The total contribution of variable $v$ for epidemic $i$ is obtained by summing across all lags:
-
-$$
-\eta_i^{(v)}
-=
-\sum_{l=0}^{L}
-f_v\!\left(x_{iv}(t_i - l),\, l\right).
-$$
-
-These contributions enter the full model additively. For example, using a logit link for beta regression, the mean disease severity $\mu_i$ is modeled as:
-
-$$
-\text{logit}(\mu_i)
-=
-\beta_0
-+
-\sum_v \eta_i^{(v)}
-+
-u_{\text{siteyear}(i)},
-$$
-
-where $u_{\text{siteyear}(i)} \sim \mathcal{N}(0, \sigma^2)$ represents a random intercept accounting for site–year–level heterogeneity.
+>This step constructs shared cross-basis templates for each climatic variable using the DLNM framework. Exposure histories from all epidemics are concatenated into a pooled structure with artificial separation gaps to prevent carryover effects across epidemics. These templates define the functional structure used to represent how climatic exposures vary across both intensity and lag time.
 
 ```{r}
 
@@ -256,62 +210,11 @@ for (v in VARS) {
 
 ## Epidemic matrix (design)
 
-Disease severity was observed once per epidemic at the assessment time, whereas climatic exposures were recorded daily over the entire growing period. To reconcile these different temporal resolutions within the DLNM framework, the lagged exposure histories of each epidemic were mapped onto epidemic-level covariates using pre-defined cross-basis templates.
+>Disease severity was observed once per epidemic at the assessment time, whereas climatic exposures were recorded daily over the entire growing period. To reconcile these different temporal resolutions within the DLNM framework, the lagged exposure histories of each epidemic were mapped onto epidemic-level covariates using pre-defined cross-basis templates.
 
-For each climatic variable, the daily exposure series of an epidemic was transformed into a vector of basis coefficients corresponding to the last observed time point (the assessment day). This operation collapses the full distributed lag structure into a single row per epidemic while preserving the cumulative contribution of past exposures encoded by the DLNM. By applying the same cross-basis template to all epidemics, this step ensures that each epidemic is represented within a common functional space, allowing the resulting coefficients to be estimated consistently within a generalized mixed-effects model.
+>For each climatic variable, the daily exposure series of an epidemic was transformed into a vector of basis coefficients corresponding to the last observed time point (the assessment day). This operation collapses the full distributed lag structure into a single row per epidemic while preserving the cumulative contribution of past exposures encoded by the DLNM. By applying the same cross-basis template to all epidemics, this step ensures that each epidemic is represented within a common functional space, allowing the resulting coefficients to be estimated consistently within a generalized mixed-effects model.
 
-The resulting epidemic-level design matrix contains one row per epidemic and multiple columns per climatic variable, each column corresponding to a specific exposure–lag basis function. These columns serve as fixed-effect predictors in the inferential model, linking past climatic conditions to disease severity through the DLNM representation.
-
-Let $i = 1, \dots, N$ index epidemics, and let $t_i$ denote the disease assessment time for epidemic $i$. For a climatic variable $v$, let $x_{iv}(t_i - l)$ be the exposure at lag $l$, with $l = 0, 1, \dots, L$.
-
-Using the previously defined cross-basis functions, the distributed lag contribution of variable $v$ for epidemic $i$ can be written as:
-
-$$
-\eta_i^{(v)}
-=
-\sum_{l=0}^{L}
-f_v\!\left(x_{iv}(t_i - l),\, l\right),
-$$
-
-where the exposure–lag response surface is approximated by a tensor product of spline bases:
-
-$$
-f_v(x,l)
-=
-\sum_{k=1}^{K_v}
-\sum_{m=1}^{M_v}
-\beta^{(v)}_{km}
-\, B^{(v)}_k(x)
-\, C^{(v)}_m(l).
-$$
-
-Here, $B^{(v)}_k(x)$ are the spline basis functions for the exposure dimension and $C^{(v)}_m(l)$ are the spline basis functions for the lag dimension. The coefficients $\beta^{(v)}_{km}$ are estimated in the inferential model.
-
-Evaluating the cross-basis at the final time point $t_i$ yields a vector of basis values for each epidemic, denoted $\mathbf{X}_i^{(v)}$. Stacking these vectors across all climatic variables produces the epidemic-level design matrix:
-
-$$
-\mathbf{X}_i
-=
-\left[
-\mathbf{X}_i^{(\text{rain})},
-\mathbf{X}_i^{(\text{tmax})},
-\mathbf{X}_i^{(\text{vpd})}
-\right].
-$$
-
-This design matrix enters the generalized mixed-effects model as fixed effects:
-
-$$
-\text{logit}(\mu_i)
-=
-\beta_0
-+
-\mathbf{X}_i \boldsymbol{\beta}
-+
-u_{\text{siteyear}(i)},
-$$
-
-where $\mu_i$ is the mean disease severity for epidemic $i$ and $u_{\text{siteyear}(i)} \sim \mathcal{N}(0,\sigma^2)$ accounts for site–year–level heterogeneity.
+>The resulting epidemic-level design matrix contains one row per epidemic and multiple columns per climatic variable, each column corresponding to a specific exposure–lag basis function. These columns serve as fixed-effect predictors in the inferential model, linking past climatic conditions to disease severity through the DLNM representation.
 
 ```{r}
 
@@ -351,62 +254,17 @@ dplyr::select(epi_id, sev, siteyear, year, location, state, latitude, longitude,
 #  left_join(X, by = "epi_id")
 ```
 
-This step converts the full daily exposure histories into epidemic-level predictors that retain the cumulative and delayed effects of climate encoded by the DLNM. The transformation allows the distributed lag structure to be estimated using a single observation per epidemic while maintaining biological interpretability of the climatic effects across time.
+> This step converts the full daily exposure histories into epidemic-level predictors that retain the cumulative and delayed effects of climate encoded by the DLNM. The transformation allows the distributed lag structure to be estimated using a single observation per epidemic while maintaining biological interpretability of the climatic effects across time.
 
 ## Modeling framework
 
 ### Inferential framework and model fitting
 
-After constructing epidemic-level DLNM design matrices, disease severity was modeled using a generalized mixed-effects framework. Because the response variable represents a proportion bounded between 0 and 1, a beta regression with a logit link was adopted. This formulation allows flexible modeling of the mean disease severity while respecting the bounded nature of the data.
+> After constructing epidemic-level DLNM design matrices, disease severity was modeled using a generalized mixed-effects framework. Because the response variable represents a proportion bounded between 0 and 1, a beta regression with a logit link was adopted. This formulation allows flexible modeling of the mean disease severity while respecting the bounded nature of the data.
 
-The DLNM cross-basis coefficients derived for each climatic variable were included as fixed effects in the linear predictor, linking past climatic exposures to disease severity through their distributed and non-linear effects. To account for unobserved heterogeneity among epidemics conducted at different locations and years, a random intercept was specified at the site–year level. This hierarchical structure captures baseline differences in disease pressure that are not explained by the climatic covariates.
+>The DLNM cross-basis coefficients derived for each climatic variable were included as fixed effects in the linear predictor, linking past climatic exposures to disease severity through their distributed and non-linear effects. To account for unobserved heterogeneity among epidemics conducted at different locations and years, a random intercept was specified at the site–year level. This hierarchical structure captures baseline differences in disease pressure that are not explained by the climatic covariates.
 
-Importantly, the DLNM itself does not perform inference; rather, it defines the structure of the predictors. All statistical inference—including estimation of coefficients, uncertainty quantification, and hypothesis testing—is carried out within the mixed-effects beta regression model. Thus, this step represents the point at which the distributed lag non-linear effects are formally estimated and interpreted.
-
-Let $i = 1, \dots, N$ index epidemics, and let $y_i \in (0,1)$ denote the observed disease severity at the assessment time. Disease severity is assumed to follow a beta distribution with mean $\mu_i$ and precision parameter $\phi$:
-
-$$
-y_i \sim \text{Beta}(\mu_i, \phi).
-$$
-
-The mean $\mu_i$ is linked to a linear predictor via a logit link function:
-
-$$
-\text{logit}(\mu_i)
-=
-\eta_i.
-$$
-
-The linear predictor is specified as:
-
-$$
-\eta_i
-=
-\beta_0
-+
-\sum_{v}
-\mathbf{X}_i^{(v)} \boldsymbol{\beta}^{(v)}
-+
-u_{\text{siteyear}(i)},
-$$
-
-where:
-
--   $\beta_0$ is the global intercept,\
--   $\mathbf{X}_i^{(v)}$ is the epidemic-level DLNM design vector for climatic variable $v$,\
--   $\boldsymbol{\beta}^{(v)}$ is the corresponding vector of fixed-effect coefficients,\
--   $u_{\text{siteyear}(i)} \sim \mathcal{N}(0, \sigma^2)$ is a random intercept capturing site–year–specific deviations.
-
-Each design vector $\mathbf{X}_i^{(v)}$ encodes the cumulative contribution of past exposures through the DLNM cross-basis evaluated at the assessment time:
-
-$$
-\mathbf{X}_i^{(v)} \boldsymbol{\beta}^{(v)}
-=
-\sum_{l=0}^{L}
-f_v\!\left(x_{iv}(t_i - l),\, l\right),
-$$
-
-where $f_v(\cdot,\cdot)$ denotes the exposure–lag response surface defined by the DLNM for variable $v$.
+>Importantly, the DLNM itself does not perform inference; rather, it defines the structure of the predictors. All statistical inference—including estimation of coefficients, uncertainty quantification, and hypothesis testing—is carried out within the mixed-effects beta regression model. Thus, this step represents the point at which the distributed lag non-linear effects are formally estimated and interpreted.
 
 ```{r}
 
@@ -429,47 +287,14 @@ fit_tmb <- glmmTMB(
 summary(fit_tmb)
 ```
 
-This modeling step represents the inferential core of the analysis. The DLNM defines how climatic effects are structured across exposure levels and time lags, while the mixed-effects beta regression estimates the magnitude, direction, and uncertainty of these effects. The resulting model quantifies how past climatic conditions jointly shape disease severity at the assessment time, accounting for both delayed responses and unobserved heterogeneity among site–year combinations.
+>This modeling step represents the inferential core of the analysis. The DLNM defines how climatic effects are structured across exposure levels and time lags, while the mixed-effects beta regression estimates the magnitude, direction, and uncertainty of these effects. The resulting model quantifies how past climatic conditions jointly shape disease severity at the assessment time, accounting for both delayed responses and unobserved heterogeneity among site–year combinations.
 
 ### Model performance
 
-After fitting the DLNM-based mixed-effects beta regression model, fitted values were obtained for each epidemic to quantify the model-implied mean disease severity at the assessment time. These fitted values represent the expected severity conditional on the estimated distributed lag non-linear effects of climatic variables and the random site–year effects.
+>After fitting the DLNM-based mixed-effects beta regression model, fitted values were obtained for each epidemic to quantify the model-implied mean disease severity at the assessment time. These fitted values represent the expected severity conditional on the estimated distributed lag non-linear effects of climatic variables and the random site–year effects.
 
-Predictions were generated on the response scale, yielding values directly interpretable as mean disease severity proportions. By attaching these fitted values to the epidemic-level dataset, this step facilitates subsequent model evaluation, diagnostic checks, and graphical comparison between observed and model-implied disease severity. Importantly, these predictions are not used to refit the model; rather, they summarize how the inferred DLNM structure translates into expected epidemiological outcomes for the observed data.
+>Predictions were generated on the response scale, yielding values directly interpretable as mean disease severity proportions. By attaching these fitted values to the epidemic-level dataset, this step facilitates subsequent model evaluation, diagnostic checks, and graphical comparison between observed and model-implied disease severity. Importantly, these predictions are not used to refit the model; rather, they summarize how the inferred DLNM structure translates into expected epidemiological outcomes for the observed data.
 
-Let $y_i \in (0,1)$ denote the observed disease severity for epidemic $i$, and let $\mu_i$ be its model-implied mean. After fitting the mixed-effects beta regression model, predictions are obtained as:
-
-$$
-\hat{\mu}_i
-=
-\mathbb{E}(y_i \mid \mathbf{X}_i, u_{\text{siteyear}(i)}),
-$$
-
-where $\mathbf{X}_i$ is the epidemic-level DLNM design vector and $u_{\text{siteyear}(i)}$ is the estimated random intercept for the corresponding site–year.
-
-Using a logit link, the predicted mean is given by:
-
-$$
-\hat{\mu}_i
-=
-\text{logit}^{-1}(\hat{\eta}_i),
-$$
-
-with linear predictor:
-
-$$
-\hat{\eta}_i
-=
-\hat{\beta}_0
-+
-\sum_v \mathbf{X}_i^{(v)} \hat{\boldsymbol{\beta}}^{(v)}
-+
-\hat{u}_{\text{siteyear}(i)}.
-$$
-
-Here, $\hat{\beta}_0$ and $\hat{\boldsymbol{\beta}}^{(v)}$ are the estimated fixed-effect coefficients, and $\hat{u}_{\text{siteyear}(i)}$ denotes the best linear unbiased predictor (BLUP) of the random effect.
-
-The resulting fitted values $\hat{\mu}_i$ correspond to the expected disease severity at the assessment time, given the full distributed lag history of climatic exposures encoded by the DLNM.
 
 ```{r}
 
@@ -482,43 +307,13 @@ dat2$t = t
 
 ```
 
-This step translates the inferred DLNM effects into epidemic-level expectations of disease severity on the natural response scale. The fitted values summarize how the combined, lagged influence of climate and site–year heterogeneity manifests in expected disease outcomes, providing a direct link between the statistical model and epidemiological interpretation.
+>This step translates the inferred DLNM effects into epidemic-level expectations of disease severity on the natural response scale. The fitted values summarize how the combined, lagged influence of climate and site–year heterogeneity manifests in expected disease outcomes, providing a direct link between the statistical model and epidemiological interpretation.
 
 #### Agreement between observed and model-implied severity (CCC decomposition)
 
-To quantify how well the fitted model reproduces observed disease severity on the response scale, we evaluated agreement between observed severities ($y_i$) and fitted mean severities ($\hat{\mu}_i$) using Lin’s Concordance Correlation Coefficient (CCC). CCC measures both (i) *precision* (how tightly predictions follow the observed variability) and (ii) *accuracy*/*bias* (how close predictions are to the 1:1 line). This provides a single interpretable agreement metric that complements visual diagnostics.
+>To quantify how well the fitted model reproduces observed disease severity on the response scale, we evaluated agreement between observed severities ($y_i$) and fitted mean severities ($\hat{\mu}_i$) using Lin’s Concordance Correlation Coefficient (CCC). CCC measures both (i) *precision* (how tightly predictions follow the observed variability) and (ii) *accuracy*/*bias* (how close predictions are to the 1:1 line). This provides a single interpretable agreement metric that complements visual diagnostics.
 
-We also report the two standard CCC components: the Pearson correlation (precision component) and the bias correction factor (accuracy component). Together, these summarize whether lack of agreement is driven primarily by random dispersion (low precision), systematic bias (low accuracy), or both.
-
-Let $y_i$ denote observed severity and $\hat{\mu}_i$ denote the model-implied mean severity for epidemic $i$. Define:
-
--   sample means: $\bar{y}$ and $\overline{\hat{\mu}}$
--   sample variances: $s_y^2$ and $s_{\hat{\mu}}^2$
--   sample covariance: $s_{y,\hat{\mu}}$
-
-The Pearson correlation (precision component) is:
-
-$$
-\rho
-=
-\frac{s_{y,\hat{\mu}}}{s_y\, s_{\hat{\mu}}}.
-$$
-
-Lin’s concordance correlation coefficient is:
-
-$$
-\rho_c
-=
-\frac{2 s_{y,\hat{\mu}}}{s_y^2 + s_{\hat{\mu}}^2 + (\bar{y}-\overline{\hat{\mu}})^2}.
-$$
-
-It can be decomposed as:
-
-$$
-\rho_c = \rho \times C_b,
-$$
-
-where $C_b$ is the bias correction factor (accuracy component), with $0 < C_b \le 1$, penalizing deviations from the 1:1 line due to differences in location and scale.
+>We also report the two standard CCC components: the Pearson correlation (precision component) and the bias correction factor (accuracy component). Together, these summarize whether lack of agreement is driven primarily by random dispersion (low precision), systematic bias (low accuracy), or both.
 
 ```{r}
 
@@ -538,33 +333,10 @@ gc()
 
 #### Graphical calibration and residual error distribution
 
-To complement the CCC summary, we visualized model calibration by plotting observed severity ($y_i$) against fitted mean severity ($\hat{\mu}_i$) with a 1:1 reference line. Points close to this line indicate good calibration; systematic deviations reflect bias (e.g., underprediction at high severities).
+>To complement the CCC summary, we visualized model calibration by plotting observed severity ($y_i$) against fitted mean severity ($\hat{\mu}_i$) with a 1:1 reference line. Points close to this line indicate good calibration; systematic deviations reflect bias (e.g., underprediction at high severities).
 
-We additionally computed residual errors on the response scale and examined their empirical distribution via a histogram, overlaying a normal density with matching mean and standard deviation. While the beta regression model does not assume normal residuals on the response scale, this visualization provides a simple check for gross asymmetry, heavy tails, or systematic shifts (non-zero mean error) that may indicate calibration issues.
+>We additionally computed residual errors on the response scale and examined their empirical distribution via a histogram, overlaying a normal density with matching mean and standard deviation. While the beta regression model does not assume normal residuals on the response scale, this visualization provides a simple check for gross asymmetry, heavy tails, or systematic shifts (non-zero mean error) that may indicate calibration issues.
 
-For epidemic $i$, define the response-scale residual error as:
-
-$$
-e_i = y_i - \hat{\mu}_i.
-$$
-
-The mean residual error summarizes average bias:
-
-$$
-\bar{e} = \frac{1}{N}\sum_{i=1}^{N} e_i,
-$$
-
-and the residual spread is summarized by:
-
-$$
-s_e = \sqrt{\frac{1}{N-1}\sum_{i=1}^{N}(e_i - \bar{e})^2 }.
-$$
-
-Calibration can be visually assessed by the proximity of points $(y_i, \hat{\mu}_i)$ to the 1:1 line:
-
-$$
-\hat{\mu} = y.
-$$
 
 ```{r}
 
@@ -617,7 +389,7 @@ sd_res = sd(dat2$error)
 
 hist = dat2 %>% 
   ggplot(aes(error))+
-  geom_histogram(aes(y = ..density..), fill = "black", color = "white", bins = 10) + # Ajusta para densidade
+  geom_histogram(aes(y = ..density..), fill = "black", color = "white", bins = 10) + 
   stat_function(fun = dnorm, args = list(mean = mean_res, sd = sd_res), 
                 color = "orange", size = 1.2, linetype = "solid")+
   theme_bw()+
@@ -631,36 +403,9 @@ hist = dat2 %>%
 
 #### Simulation-based residual diagnostics (DHARMa)
 
-Because beta mixed models can exhibit complex residual behavior—particularly under non-Gaussian likelihoods and random effects—we evaluated model adequacy using simulation-based residual diagnostics implemented in DHARMa. DHARMa simulates response replicates from the fitted model (including the specified distribution and random effects structure) and constructs *scaled residuals* that should be approximately Uniform(0,1) under correct model specification.
+>Because beta mixed models can exhibit complex residual behavior—particularly under non-Gaussian likelihoods and random effects—we evaluated model adequacy using simulation-based residual diagnostics implemented in DHARMa. DHARMa simulates response replicates from the fitted model (including the specified distribution and random effects structure) and constructs *scaled residuals* that should be approximately Uniform(0,1) under correct model specification.
 
-We then assessed the uniformity of the simulated residuals using a quantile–quantile (QQ) comparison between observed residual quantiles and their theoretical Uniform(0,1) quantiles. Systematic departures from the 1:1 line indicate potential misspecification, such as incorrect distributional assumptions, unmodeled structure, or dispersion issues.
-
-Let $y_i$ be the observed response. DHARMa generates $M$ simulated responses:
-
-$$
-y_i^{(1)}, y_i^{(2)}, \dots, y_i^{(M)} \sim p(\cdot \mid \hat{\theta}),
-$$
-
-where $\hat{\theta}$ denotes the fitted model parameters (including fixed effects, random effects structure, and distributional parameters). The scaled residual is constructed using the empirical cumulative distribution of the simulations:
-
-$$
-u_i
-=
-\frac{1}{M}\sum_{m=1}^{M} \mathbb{I}\!\left(y_i^{(m)} \le y_i\right),
-$$
-
-which should satisfy:
-
-$$
-u_i \sim \text{Uniform}(0,1)
-\quad \text{if the model is correctly specified.}
-$$
-
-For a QQ plot, the theoretical Uniform(0,1) quantiles are:
-
-$$
-q
-$$
+>We then assessed the uniformity of the simulated residuals using a quantile–quantile (QQ) comparison between observed residual quantiles and their theoretical Uniform(0,1) quantiles. Systematic departures from the 1:1 line indicate potential misspecification, such as incorrect distributional assumptions, unmodeled structure, or dispersion issues.
 
 ```{r}
 
@@ -714,57 +459,17 @@ library(patchwork)
 ggsave("fig/model.png", dpi = 600, width = 8, height = 6)
 ```
 
-### Estimation of cumulative relative risks over epidemiologically defined lag windows
+# Cumulative effects
 
-To summarize the distributed effects of climatic variables in an epidemiologically interpretable manner, relative risks were derived from the fitted DLNM by aggregating lag-specific contributions over predefined temporal windows. Rather than interpreting individual lag effects, which may be difficult to relate directly to biological processes, cumulative effects were computed for early and late lag periods corresponding to distinct phases of epidemic development.
+>To summarize the distributed effects of climatic variables in an epidemiologically interpretable manner, relative risks were derived from the fitted DLNM by aggregating lag-specific contributions over predefined temporal periods. Rather than interpreting individual lag effects, which may be difficult to relate directly to biological processes, cumulative effects were computed for early and late lag periods corresponding to distinct phases of epidemic development.
 
-For each climatic variable, the DLNM provides an estimated exposure–lag response surface describing how past exposures contribute to disease severity at the assessment time. By summing the lag-specific contributions across a given lag window and exponentiating the resulting linear predictor, a cumulative relative risk is obtained. This quantity represents the proportional change in expected disease severity associated with a given exposure level, relative to a reference value, accounting for the entire exposure history within the specified lag interval.
+>For each climatic variable, the DLNM provides an estimated exposure–lag response surface describing how past exposures contribute to disease severity at the assessment time. By summing the lag-specific contributions across a given lag period and exponentiating the resulting linear predictor, a cumulative relative risk is obtained. This quantity represents the proportional change in expected disease severity associated with a given exposure level, relative to a reference value, accounting for the entire exposure history within the specified lag interval.
 
-Lag windows were defined a priori to reflect biologically meaningful phases of the epidemic. The early window (0–40 days before assessment) captures processes related to infection establishment, latent development, and early lesion formation, whereas the late window (41–70 days) reflects symptom expansion and disease expression near the assessment stage. This aggregation facilitates direct comparison of climatic effects across variables and epidemic phases, while preserving the non-linear and delayed structure estimated by the DLNM.
-
-Let $i$ index epidemics and let $t_i$ denote the disease assessment time. For a climatic variable $v$, let $x_{iv}(t_i - l)$ be the exposure at lag $l$, with $l = 0, 1, \dots, L$.
-
-The DLNM defines an exposure–lag response surface $f_v(x,l)$, such that the total contribution of variable $v$ to the linear predictor is:
-
-$$
-\eta_i^{(v)}
-=
-\sum_{l=0}^{L}
-f_v\!\left(x_{iv}(t_i - l),\, l\right).
-$$
-
-To obtain a cumulative effect over a specific lag window $\mathcal{L} \subset \{0,\dots,L\}$, the contribution is restricted to that window:
-
-$$
-\eta_{i,\mathcal{L}}^{(v)}
-=
-\sum_{l \in \mathcal{L}}
-f_v\!\left(x_{iv}(t_i - l),\, l\right).
-$$
-
-Relative risk is then defined with respect to a reference exposure value $x_v^{\mathrm{ref}}$ (here chosen as the median of the observed exposure distribution):
-
-$$
-RR_v(x;\mathcal{L})
-=
-\exp\!\left(
-\eta_{i,\mathcal{L}}^{(v)}(x)
--
-\eta_{i,\mathcal{L}}^{(v)}(x_v^{\mathrm{ref}})
-\right).
-$$
-
-For ease of interpretation, relative risk is often expressed as a percentage change:
-
-$$
-\%\Delta_v(x;\mathcal{L})
-=
-\left[ RR_v(x;\mathcal{L}) - 1 \right] \times 100.
-$$
+>Lag periods were defined a priori to reflect biologically meaningful phases of the epidemic. The early period (0–40 days before assessment) captures processes related to infection establishment, latent development, and early lesion formation, whereas the late period (41–70 days) reflects symptom expansion and disease expression near the assessment stage. This aggregation facilitates direct comparison of climatic effects across variables and epidemic phases, while preserving the non-linear and delayed structure estimated by the DLNM.
 
 #### Temperature
 
-##### Later window (0-40)
+##### Later period (0-40)
 
 ```{r}
 var <- "tmax"
@@ -779,11 +484,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -795,14 +500,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 0:40)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -835,7 +540,7 @@ ggplot(aes(x=tmean, y=PERC)) +
 tmean_RR_second
 ```
 
-##### Ealier window (41-70)
+##### Ealier period (41-85)
 
 ```{r}
 var <- "tmax"
@@ -850,11 +555,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -866,14 +571,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 41:85)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -912,7 +617,7 @@ tmean_RR_first
 
 #### Precipitation
 
-##### Later window (0-40)
+##### Later period (0-40)
 
 ```{r}
 var <- "rain_cum"
@@ -927,11 +632,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -943,14 +648,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 0:40)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -984,7 +689,7 @@ rain_RR_second
 
 ```
 
-##### Ealier window (41-70)
+##### Ealier period (41-85)
 
 ```{r}
 var <- "rain_cum"
@@ -999,11 +704,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -1015,14 +720,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 41:85)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -1059,7 +764,7 @@ rain_RR_first
 
 #### VPD
 
-##### Later window (0-40)
+##### Later period (0-40)
 
 ```{r}
 var <- "vpd"
@@ -1074,11 +779,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -1090,14 +795,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 0:40)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -1137,7 +842,7 @@ vpd_RR_second
 
 ```
 
-##### Ealier window (41-70)
+##### Ealier period (41-85)
 
 ```{r}
 var <- "vpd"
@@ -1152,11 +857,11 @@ idx <- grepl(prefix, names(cf))
 beta   <- cf[idx]
 vc_sub <- vc[idx, idx]
 
-# valores para curva completa
+# values for the complete curve
 x_all   <- wx_use[[var]]
 grid    <- sort(unique(as.numeric(quantile(x_all, seq(0.05,0.95,by=0.01)))))
 
-# referência (P50) usada como centragem
+# reference (P50) used as centering
 P50 <- quantile(x_all, 0.50, na.rm=TRUE)
 
 cp <- crosspred(
@@ -1168,14 +873,14 @@ cp <- crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit     # matriz: rows = grid, cols = lags
+mf <- cp$matfit     # matrix: rows = grid, cols = lags
 
 lag_idx <- suppressWarnings(as.integer(gsub("lag","", colnames(mf))))
 if(anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 colsA <- which(lag_idx %in% 41:85)
 
-# efeito cumulativo para CADA temperatura do grid
+# cumulative effect for EACH grid temperature
 etaA <- apply(mf[, colsA, drop=FALSE], 1, sum)
 
 RR <- exp(etaA)
@@ -1234,7 +939,7 @@ library(patchwork)
 #ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
 ```
 
-### Lag movel
+### Daily effect
 
 #### Temperature
 
@@ -1245,7 +950,7 @@ library(ggplot2)
 library(tidyr)
 
 # ==============================================================
-# 1) EXTRAIR COEFICIENTES
+# 1) EXTRACT COEFFICIENTS
 # ==============================================================
 
 var <- "tmax"
@@ -1262,26 +967,26 @@ stopifnot(length(beta) == ncol(cb))
 stopifnot(nrow(vc_sub) == ncol(cb))
 
 # ==============================================================
-# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# 2) DEFINE GRID AND TMEAN RANGE FOR THE HEATMAP
 # ==============================================================
 
 x_all <- wx_use[[var]]
 P50   <- quantile(x_all, 0.50, na.rm = TRUE)
 
-# grid usado pelo DLNM
+# Grid used by DLNM
 grid <- sort(unique(as.numeric(quantile(
   x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
 ))))
 
-# valores desejados para o heatmap (26 a 30 °C)
+# Desired values for the heatmap (29 to 34 °C)
 #at_vals <- seq(1, 2, length.out = 10000)
 at_vals <- seq(29, 34, length.out = 10000)
 
-# ajustar ao range REAL do grid (evita extrapolação)
+# Adjust to the REAL grid range (avoids extrapolation)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
 
 # ==============================================================
-# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# 3) crosspred IN ALL at-vals (mobile lag)
 # ==============================================================
 
 cp <- crosspred(
@@ -1293,21 +998,21 @@ cp <- crosspred(
   bylag = 1
 )
 
-# matriz: linhas = valores de tmean; colunas = lags
+# matrix: rows = tmean values; columns = lags
 mf <- cp$matfit
 
-# criar vetor de lags
+# create lag vectors
 lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
 if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 # ==============================================================
-# 4) Converter para RR(lag) e depois % (% change)
+# 4) Convert to RR (lag) and then % (% change)
 # ==============================================================
 
 RR_mat   <- exp(mf)
 PERC_mat <- (RR_mat - 1) * 100
 
-# pivô para formato tidy
+# pivot to tidy format
 df_heat <- as.data.frame(PERC_mat)
 colnames(df_heat) <- paste0("lag_", lag_idx)
 df_heat <- df_heat %>%
@@ -1350,36 +1055,36 @@ library(dplyr)
 library(scales)
 library(metR)
 
-# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
-#     e forçar limites simétricos ao redor de zero:
+
+# 2a) (optional but very useful) "trim" outliers for the color scale
+#     and enforce symmetric limits around zero:
 lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
 max_abs <- max(abs(lims))
 df_plot <- df_heat %>%
-  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))
 
-# 2b) Heatmap + isolinhas
+# 2b) Heatmap + countour lines
 tmean_movel = df_plot %>% 
 ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
-  # raster interpolado fica mais liso na tela
+  # interpolated raster looks smoother on screen
   geom_raster(interpolate = TRUE) +
-  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
+  # contour lines (0% and ±5, ±10, ±15...)
   geom_contour(aes(z = PERC), color = "black", size = 0.25,
                breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
-  # rótulo só na isolinha zero (neutro) para guiar leitura
+  # label only the zero contour (neutral) to guide interpretation
   geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
                     label.padding = unit(0.15, "lines"), size = 3.2) +
-  # paleta perceptual e centrada no 0 (diverging)
+  # perceptual palette centered at 0 (diverging)
 scale_fill_gradient2(
   low = "#2c7bb6", mid = "white", high = "#d7191c",
   midpoint = 0, limits = c(-max_abs, max_abs),
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(4, "cm"),  # << AQUI você estica
-    barheight = unit(0.5, "cm")  # espessura da barra
+    barwidth  = unit(4, "cm"),  
+    barheight = unit(0.5, "cm")
   )
 )+
-  # eixos e guias
   #scale_x_reverse()+
   scale_x_continuous(trans = "reverse",
     breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
@@ -1419,25 +1124,27 @@ summary(fit_sel)
 ```
 
 ```{r}
+
 # ============================================================
-# PRÉ-REQUISITOS (devem existir no ambiente):
-#   fit_sel      : glmmTMB beta-logit já ajustado
-#   dat          : data.frame usado no ajuste (com colunas cb_*)
-#   wx_use       : dados climáticos (epi_id, tmax, rain_cum, vpd)
-#   cb_templates : lista com templates crossbasis (tmax, rain_cum, vpd)
-#   LAG_MAX      : lag máximo (ex.: 85)
+# PREREQUISITES (must exist in the environment):
+#   fit_sel      : fitted beta-logit glmmTMB model
+#   dat          : data.frame used for fitting (with cb_* columns)
+#   wx_use       : weather data (epi_id, tmax, rain_cum, vpd)
+#   cb_templates : list with crossbasis templates (tmax, rain_cum, vpd)
+#   LAG_MAX      : maximum lag (e.g., 85)
 # ============================================================
+
 stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"),
           exists("cb_templates"), exists("LAG_MAX"))
 
 # ------------------------------------------------------------
-# 1) UTILITÁRIOS
+# 1) UTILITIES
 # ------------------------------------------------------------
 get_cb_names <- function(dat, var) {
   grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
 }
 
-# comprimento típico da série por epidemia
+# typical time series length per epidemic
 n_ref <- wx_use %>%
   filter(!is.na(tmax)) %>%
   count(epi_id) %>%
@@ -1445,10 +1152,10 @@ n_ref <- wx_use %>%
   median() %>%
   as.integer()
 
-# garante suporte para todos os lags
+# ensure support for all lags
 n_ref <- max(n_ref, LAG_MAX + 1)
 
-# cria série diária com valor "val" apenas na banda de lag
+# create a daily series with value "value" only within the lag band
 make_series_band <- function(value, cen, n_ref, band = NULL) {
   x <- rep(cen, n_ref)
   if (!is.null(band)) {
@@ -1462,7 +1169,7 @@ make_series_band <- function(value, cen, n_ref, band = NULL) {
   x
 }
 
-# extrai a última linha da crossbasis
+# extract the last row of the crossbasis
 last_cb_row <- function(x, cb_template, LAG_MAX) {
   cbx <- dlnm::crossbasis(
     x, lag = LAG_MAX,
@@ -1472,7 +1179,7 @@ last_cb_row <- function(x, cb_template, LAG_MAX) {
   as.numeric(cbx[length(x), ])
 }
 
-# predição manual (pop-level; beta-logit)
+# manual prediction (population-level; beta-logit)
 predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
   eta <- unname(beta["(Intercept)"]) +
     sum(unname(beta[nm_t]) * bt) +
@@ -1483,7 +1190,7 @@ predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
 }
 
 # ------------------------------------------------------------
-# 2) NOMES DAS COLUNAS cb_* NO MODELO
+# 2) COLUMN NAMES cb_* IN THE MODEL
 # ------------------------------------------------------------
 nm_t <- get_cb_names(dat, "tmax")
 nm_r <- get_cb_names(dat, "rain_cum")
@@ -1491,19 +1198,19 @@ nm_v <- get_cb_names(dat, "vpd")
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
 # ------------------------------------------------------------
-# 3) COEFICIENTES FIXOS
+# 3) FIXED EFFECT COEFFICIENTS
 # ------------------------------------------------------------
 beta <- fixef(fit_sel)$cond
 stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
 
 # ------------------------------------------------------------
-# 4) BASELINE (P50) DAS VARIÁVEIS
+# 4) BASELINE (P50) FOR VARIABLES
 # ------------------------------------------------------------
 cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
 cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
 cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
 
-# séries baseline (constantes)
+# baseline series (constant)
 xt0 <- make_series_band(cen_t, cen_t, n_ref, band = NULL)
 xr0 <- make_series_band(cen_r, cen_r, n_ref, band = NULL)
 xv0 <- make_series_band(cen_v, cen_v, n_ref, band = NULL)
@@ -1512,21 +1219,21 @@ bt0 <- last_cb_row(xt0, cb_templates[["tmax"]],     LAG_MAX)
 br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
 bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
 
-# severidade baseline
+# baseline severity
 base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
 sev_base_pct <- 100 * base["mu"]
 
 # ------------------------------------------------------------
-# 5) GRID DE TMAX
+# 5) TMAX GRID
 # ------------------------------------------------------------
 t_grid <- seq(19, 34, length.out = 200)
 
-# janelas
+# periods
 band_later   <- 0:40      # Later
 band_earlier <- 41:85     # Earlier
 
 # ------------------------------------------------------------
-# 6) FUNÇÃO PARA CALCULAR CURVA POR JANELA
+# 6) FUNCTION TO COMPUTE CURVES BY PERIOD
 # ------------------------------------------------------------
 calc_curve_phase_tmax <- function(values, band) {
   sapply(values, function(val) {
@@ -1541,7 +1248,7 @@ calc_curve_phase_tmax <- function(values, band) {
 }
 
 # ------------------------------------------------------------
-# 7) CALCULAR AS DUAS CURVAS
+# 7) COMPUTE BOTH CURVES
 # ------------------------------------------------------------
 sev_tmax_later   <- calc_curve_phase_tmax(t_grid, band_later)
 sev_tmax_earlier <- calc_curve_phase_tmax(t_grid, band_earlier)
@@ -1586,21 +1293,23 @@ sev_tmax
 ##### Delta
 
 ```{r}
+
 # ==============================================================
-# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
-# - Efeito de uma variável (ex.: tmax) ao longo dos lags
-# - BASELINE coerente com o "cen" do DLNM:
-#     baseline = predição pop-level no cenário de referência:
+# DLNM heatmap / curves by lag bands (GLMMTMB beta-logit)
+# - Effect of a single variable (e.g., tmax) across lags
+# - BASELINE consistent with the DLNM "cen":
+#     baseline = population-level prediction under the reference scenario:
 #       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
-# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# - Converts cumulative effect (Δη 0→L) into severity (%) via logit
 # ==============================================================
-# Entradas esperadas no ambiente:
+# Expected inputs in the environment:
 #   fit_sel      : glmmTMB beta_family(link="logit")
-#   dat          : data.frame usado no ajuste (contém colunas cb_*)
-#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
-#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
-#   LAG_MAX      : lag máximo usado no crossbasis
+#   dat          : data.frame used for model fitting (contains cb_* columns)
+#   cb_templates : list with crossbasis objects used in fitting (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/object with original time series containing epi_id and columns tmax, rain_cum, vpd
+#   LAG_MAX      : maximum lag used in the crossbasis
 # ==============================================================
+
 
 suppressPackageStartupMessages({
   library(dlnm)
@@ -1611,40 +1320,37 @@ suppressPackageStartupMessages({
   library(scales)
 })
 
-# --------------------- 0) Checagens ---------------------------
+# --------------------- 0) Checks ---------------------------
 stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
 
-# --------------------- 1) Parâmetros --------------------------
+# --------------------- 1) Parameters --------------------------
 var <- "tmax"  # tmax | rain_cum | vpd
 
-if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] does not exist.")
 if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
-  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+  stop("cb_templates must contain: 'tmax', 'rain_cum', 'vpd'.")
 }
 
 x_all <- wx_use[[var]]
 if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
 
-# "cen" do DLNM: P50 da variável-alvo
+# DLNM "cen": P50 of the target variable
 P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
-# --------------------------------------------------------------
-# ✅ IMPORTANTE: NÃO cortar pelo P05–P95 se você quer 19–34
-# --------------------------------------------------------------
-at_vals <- seq(19, 34, length.out = 1000)  # força o intervalo desejado
+at_vals <- seq(19, 34, length.out = 1000) 
 
-# (opcional) Aviso se houver extrapolação fora do range observado
+# (optional) Warning if extrapolation occurs beyond observed range
 rng_obs <- range(x_all, na.rm = TRUE)
 if (min(at_vals) < rng_obs[1] || max(at_vals) > rng_obs[2]) {
-  message("ATENÇÃO: at_vals inclui valores fora do range observado: ",
-          "range observado = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
+  message("WARNING: at_vals includes values outside the observed range: ",
+          "observed range = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
 }
 
-# Lags para plot
+# Lags for plotting
 lag_max_plot <- 85L
 lag_max_plot <- min(lag_max_plot, LAG_MAX)
 
-# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+# --------------------- 2) Coefs/VCOV only for cb_var block ------------------
 cb <- cb_templates[[var]]
 
 cf_all <- coef(summary(fit_sel))$cond[, 1]
@@ -1653,18 +1359,18 @@ vc_all <- vcov(fit_sel)$cond
 pref <- paste0("^cb_", var, "_")
 
 idx_beta <- grep(pref, names(cf_all))
-if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+if (length(idx_beta) == 0) stop("Could not find cb_ coefficients for var='", var, "'.")
 beta <- cf_all[idx_beta]
 
 idx_rows <- grep(pref, rownames(vc_all))
 idx_cols <- grep(pref, colnames(vc_all))
 V <- vc_all[idx_rows, idx_cols, drop = FALSE]
 
-# Checagens
-if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
-if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+# Checks
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb).  Check cb_templates and the model.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV does not match ncol(cb).")
 
-# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+# --------------------- 3) crosspred: Δη by lag vs cen=P50_var ----------------
 cp <- dlnm::crosspred(
   cb,
   coef  = beta,
@@ -1674,9 +1380,9 @@ cp <- dlnm::crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+mf <- cp$matfit  # Δη (link) by lag; rows=at_vals, columns=lags
 
-# Ordenar lags
+# Sort lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
 if (anyNA(lag_idx)) {
   lag_idx <- 0:(ncol(mf) - 1)
@@ -1686,17 +1392,17 @@ ord <- order(lag_idx)
 mf <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
-# manter 0..lag_max_plot
+# keep 0..lag_max_plot
 keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf <- mf[, keep, drop = FALSE]
 lag_idx <- lag_idx[keep]
 
-# --------------------- 4) Baseline coerente (cenário conjunto P50) ------------
+# --------------------- 4) Consistent baseline (joint P50 scenario) ------------
 P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
 P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
 P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
 
-# n_ref (comprimento típico)
+# n_ref (typical series length)
 n_ref <- wx_use %>%
   filter(!is.na(tmax)) %>%
   count(epi_id) %>%
@@ -1706,13 +1412,13 @@ n_ref <- wx_use %>%
 
 n_ref <- max(n_ref, LAG_MAX + 1)
 
-# nomes cb_* no dat
+# cb_* names in dat
 nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
 nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
 nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
-# função: última linha do crossbasis para série constante
+# function: last crossbasis row for constant series
 last_cb_row_const <- function(value, cb_template, LAG_MAX, n_ref) {
   x <- rep(value, n_ref)
   cbx <- dlnm::crossbasis(
@@ -1727,21 +1433,21 @@ bt0 <- last_cb_row_const(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
 br0 <- last_cb_row_const(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
 bv0 <- last_cb_row_const(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
 
-# newdata referência
-nd0 <- data.frame(siteyear = dat$siteyear[1])  # precisa ter um level válido
+# reference newdata
+nd0 <- data.frame(siteyear = dat$siteyear[1])  # must contain a valid level
 nd0[nm_t] <- as.list(bt0)
 nd0[nm_r] <- as.list(br0)
 nd0[nm_v] <- as.list(bv0)
 
 sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
 
-# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+# --------------------- 5) Convert cumulative Δη 0→L into final severity -----
 mf_cum <- t(apply(mf, 1, cumsum))
 
 SEV_mat <- plogis(qlogis(sev_base) + mf_cum)   # 0–1
-SEVdiff_pp <- 100 * (SEV_mat - sev_base)       # pontos percentuais (pp)
+SEVdiff_pp <- 100 * (SEV_mat - sev_base)       # percent points (pp)
 
-# --------------------- 6) Data frame long (heatmap) ---------------------------
+# --------------------- 6) Long data frame (heatmap) ---------------------------
 df_diff <- as.data.frame(100 * (SEV_mat - sev_base))
 colnames(df_diff) <- paste0("lag_", lag_idx)
 
@@ -1750,7 +1456,7 @@ df_diff <- df_diff %>%
   pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
-# --------------------- 7) Heatmap (Δ em pp) ----------------------------------
+# --------------------- 7) Heatmap (Δ in pp) ----------------------------------
 p_heat_diff_tmax <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
   geom_raster() +
   scale_fill_viridis_c(name = "Δ (pp)") +
@@ -1784,8 +1490,7 @@ library(ggplot2)
 library(tidyr)
 
 # ==============================================================
-
-# 1) EXTRAIR COEFICIENTES
+# 1) EXTRACT COEFFICIENTS
 # ==============================================================
 
 var <- "rain_cum"
@@ -1802,26 +1507,26 @@ stopifnot(length(beta) == ncol(cb))
 stopifnot(nrow(vc_sub) == ncol(cb))
 
 # ==============================================================
-# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# 2) DEFINE GRID AND TMEAN RANGE FOR THE HEATMAP
 # ==============================================================
 
 x_all <- wx_use[[var]]
 P50   <- quantile(x_all, 0.50, na.rm = TRUE)
 
-# grid usado pelo DLNM
+# Grid used by DLNM
 grid <- sort(unique(as.numeric(quantile(
   x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
 ))))
 
-# valores desejados para o heatmap (26 a 30 °C)
+# Desired values for the heatmap (0 to 600 mm)
 #at_vals <- seq(1, 2, length.out = 10000)
 at_vals <- seq(0, 600, length.out = 10000)
 
-# ajustar ao range REAL do grid (evita extrapolação)
+# Adjust to the REAL grid range (avoids extrapolation)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
 
 # ==============================================================
-# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# 3) crosspred IN ALL at-vals (mobile lag)
 # ==============================================================
 
 cp <- crosspred(
@@ -1833,21 +1538,21 @@ cp <- crosspred(
   bylag = 1
 )
 
-# matriz: linhas = valores de tmean; colunas = lags
+# matrix: rows = tmean values; columns = lags
 mf <- cp$matfit
 
-# criar vetor de lags
+# create lag vectors
 lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
 if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 # ==============================================================
-# 4) Converter para RR(lag) e depois % (% change)
+# 4) Convert to RR (lag) and then % (% change)
 # ==============================================================
 
 RR_mat   <- exp(mf)
 PERC_mat <- (RR_mat - 1) * 100
 
-# pivô para formato tidy
+# pivot for tidy format
 df_heat <- as.data.frame(PERC_mat)
 colnames(df_heat) <- paste0("lag_", lag_idx)
 df_heat <- df_heat %>%
@@ -1886,35 +1591,34 @@ library(ggplot2)
 library(dplyr)
 library(scales)
 
-# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
-#     e forçar limites simétricos ao redor de zero:
+# 2a) (optional but very useful) "trim" outliers for the color scale
+#     and enforce symmetric limits around zero:
 lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
 max_abs <- max(abs(lims))
 df_plot <- df_heat %>%
-  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))
 
-# 2b) Heatmap + isolinhas
+# 2b) Heatmap + countour lines
 rain_movel = df_plot %>% 
 ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
-  # raster interpolado fica mais liso na tela
+  # interpolated raster looks smoother on screen
   geom_raster(interpolate = TRUE) +
-  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
+  # contour lines (0% and ±5, ±10, ±15...)
   geom_contour(aes(z = PERC), color = "black", size = 0.25) +
-  # rótulo só na isolinha zero (neutro) para guiar leitura
+  # label only the zero contour (neutral) to guide interpretation
   geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
                     label.padding = unit(0.15, "lines"), size = 3.2) +
-  # paleta perceptual e centrada no 0 (diverging)
+  # perceptual palette centered at 0 (diverging)
 scale_fill_gradient2(
   low = "#2c7bb6", mid = "white", high = "#d7191c",
   midpoint = 0, limits = c(-max_abs, max_abs),
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(4, "cm"),  # << AQUI você estica
-    barheight = unit(0.5, "cm")  # espessura da barra
+    barwidth  = unit(4, "cm"),  
+    barheight = unit(0.5, "cm")  
   )
 )+
-  # eixos e guias
   scale_x_continuous(trans = "reverse",
     breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
@@ -1951,24 +1655,24 @@ suppressPackageStartupMessages({
 })
 
 # ============================================================
-# PRÉ-REQUISITOS (devem existir no ambiente):
-#   fit_sel      : glmmTMB beta-logit já ajustado
-#   dat          : data.frame usado no ajuste (com colunas cb_*)
-#   wx_use       : dados climáticos (epi_id, tmax, rain_cum, vpd)
-#   cb_templates : lista com templates crossbasis (tmax, rain_cum, vpd)
-#   LAG_MAX      : lag máximo (ex.: 85)
+# PREREQUISITES (must exist in the environment):
+#   fit_sel      : fitted beta-logit glmmTMB model
+#   dat          : data.frame used for fitting (with cb_* columns)
+#   wx_use       : weather data (epi_id, tmax, rain_cum, vpd)
+#   cb_templates : list with crossbasis templates (tmax, rain_cum, vpd)
+#   LAG_MAX      : maximum lag (e.g., 85)
 # ============================================================
 stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"),
           exists("cb_templates"), exists("LAG_MAX"))
 
 # ------------------------------------------------------------
-# 1) UTILITÁRIOS
+# 1) UTILITIES
 # ------------------------------------------------------------
 get_cb_names <- function(dat, var) {
   grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
 }
 
-# comprimento típico da série por epidemia
+# typical time series length per epidemic
 n_ref <- wx_use %>%
   filter(!is.na(rain_cum)) %>%
   count(epi_id) %>%
@@ -1976,10 +1680,10 @@ n_ref <- wx_use %>%
   median() %>%
   as.integer()
 
-# garante suporte para todos os lags
+# ensure support for all lags
 n_ref <- max(n_ref, LAG_MAX + 1)
 
-# cria série diária com valor "val" apenas na banda de lag
+# create a daily series with value "value" only within the lag band
 make_series_band <- function(value, cen, n_ref, band = NULL) {
   x <- rep(cen, n_ref)
   if (!is.null(band)) {
@@ -1993,7 +1697,7 @@ make_series_band <- function(value, cen, n_ref, band = NULL) {
   x
 }
 
-# extrai a última linha da crossbasis
+# extract the last row of the crossbasis
 last_cb_row <- function(x, cb_template, LAG_MAX) {
   cbx <- dlnm::crossbasis(
     x, lag = LAG_MAX,
@@ -2003,7 +1707,7 @@ last_cb_row <- function(x, cb_template, LAG_MAX) {
   as.numeric(cbx[length(x), ])
 }
 
-# predição manual (pop-level; beta-logit)
+# manual prediction (population-level; beta-logit)
 predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
   eta <- unname(beta["(Intercept)"]) +
     sum(unname(beta[nm_t]) * bt) +
@@ -2014,7 +1718,7 @@ predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
 }
 
 # ------------------------------------------------------------
-# 2) NOMES DAS COLUNAS cb_* NO MODELO
+# 2) COLUMN NAMES cb_* IN THE MODEL
 # ------------------------------------------------------------
 nm_t <- get_cb_names(dat, "tmax")
 nm_r <- get_cb_names(dat, "rain_cum")
@@ -2022,19 +1726,19 @@ nm_v <- get_cb_names(dat, "vpd")
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
 # ------------------------------------------------------------
-# 3) COEFICIENTES FIXOS
+# 3) FIXED EFFECT COEFFICIENTS
 # ------------------------------------------------------------
 beta <- fixef(fit_sel)$cond
 stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
 
 # ------------------------------------------------------------
-# 4) BASELINE (P50)
+# 4) BASELINE (P50) FOR VARIABLES
 # ------------------------------------------------------------
 cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
 cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
 cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
 
-# séries baseline
+# baseline series
 xt0 <- make_series_band(cen_t, cen_t, n_ref, band = NULL)
 xr0 <- make_series_band(cen_r, cen_r, n_ref, band = NULL)
 xv0 <- make_series_band(cen_v, cen_v, n_ref, band = NULL)
@@ -2043,21 +1747,21 @@ bt0 <- last_cb_row(xt0, cb_templates[["tmax"]],     LAG_MAX)
 br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
 bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
 
-# severidade baseline
+# baseline severity
 base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
 sev_base_pct <- 100 * base["mu"]
 
 # ------------------------------------------------------------
-# 5) GRID DE CHUVA ACUMULADA
+# 5) RAIN CUM GRID
 # ------------------------------------------------------------
 r_grid <- seq(0, 600, length.out = 200)
 
-# janelas
+# periods
 band_later   <- 0:40      # Later
 band_earlier <- 41:85     # Earlier
 
 # ------------------------------------------------------------
-# 6) FUNÇÃO PARA CALCULAR CURVA POR JANELA
+# 6) FUNCTION TO COMPUTE CURVES BY PERIOD
 # ------------------------------------------------------------
 calc_curve_phase_rain <- function(values, band) {
   sapply(values, function(val) {
@@ -2078,7 +1782,7 @@ calc_curve_phase_rain <- function(values, band) {
 }
 
 # ------------------------------------------------------------
-# 7) CALCULAR AS DUAS CURVAS
+# 7) COMPUTE BOTH CURVES
 # ------------------------------------------------------------
 sev_rain_later   <- calc_curve_phase_rain(r_grid, band_later)
 sev_rain_earlier <- calc_curve_phase_rain(r_grid, band_earlier)
@@ -2119,22 +1823,22 @@ sev_rain = ggplot(df_rain, aes(rain_cum, sev_pct, linetype = phase)) +
 sev_rain
 
 ```
-##### Deltra
+##### Delta
 ```{r}
 # ==============================================================
-# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
-# - Efeito de uma variável (ex.: tmax) ao longo dos lags
-# - BASELINE coerente com o "cen" do DLNM:
-#     baseline = predição pop-level no cenário de referência:
+# DLNM heatmap / curves by lag bands (GLMMTMB beta-logit)
+# - Effect of a single variable (e.g., tmax) across lags
+# - BASELINE consistent with the DLNM "cen":
+#     baseline = population-level prediction under the reference scenario:
 #       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
-# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# - Converts cumulative effect (Δη 0→L) into severity (%) via logit
 # ==============================================================
-# Entradas esperadas no ambiente:
+# Expected inputs in the environment:
 #   fit_sel      : glmmTMB beta_family(link="logit")
-#   dat          : data.frame usado no ajuste (contém colunas cb_*)
-#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
-#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
-#   LAG_MAX      : lag máximo usado no crossbasis
+#   dat          : data.frame used for model fitting (contains cb_* columns)
+#   cb_templates : list with crossbasis objects used in fitting (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/object with original time series containing epi_id and columns tmax, rain_cum, vpd
+#   LAG_MAX      : maximum lag used in the crossbasis
 # ==============================================================
 
 suppressPackageStartupMessages({
@@ -2146,35 +1850,35 @@ suppressPackageStartupMessages({
   library(scales)
 })
 
-# --------------------- 0) Checagens ---------------------------
+# --------------------- 0) Checks ---------------------------
 stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"), exists("wx_use"), exists("LAG_MAX"))
 
-# --------------------- 1) Parâmetros --------------------------
-var <- "rain_cum"   # variável-alvo (tmax | rain_cum | vpd)
+# --------------------- 1) Parameters --------------------------
+var <- "rain_cum" 
 
-if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] does not exist.")
 if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
-  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+  stop("cb_templates must contain: 'tmax', 'rain_cum', 'vpd'.")
 }
 
-# Faixa do heatmap (ajuste aqui)
-x_all <- wx_use[[var]]
-if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
 
-# "cen" do DLNM: P50 da variável-alvo
+x_all <- wx_use[[var]]
+if (is.null(x_all)) stop("wx_use[['", var, "']] does not exist.")
+
+# DLNM "cen": P50 of the target variable
 P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
-# aparar faixa ao intervalo observado para evitar extrapolação
+# trim the range to the observed interval to avoid extrapolation
 grid_obs <- sort(unique(as.numeric(quantile(x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE))))
-at_vals  <- seq(0, 600, length.out = 1000)  # <<< ajuste livre #29,34
+at_vals  <- seq(0, 600, length.out = 1000)
 at_vals  <- at_vals[at_vals >= min(grid_obs) & at_vals <= max(grid_obs)]
-if (length(at_vals) < 5) stop("at_vals ficou curto demais após aparar. Ajuste seq().")
+if (length(at_vals) < 5) stop("at_vals it became too short after trimming. Adjustment seq().")
 
-# Lags para plot
-lag_max_plot <- 85L                 # <<< ajuste livre
+# Lags for plotting
+lag_max_plot <- 85L                 
 lag_max_plot <- min(lag_max_plot, LAG_MAX)
 
-# --------------------- 2) Coefs/VCOV apenas do bloco cb_var ------------------
+# --------------------- 2) Coefs/VCOV only for cb_var block ------------------
 cb <- cb_templates[[var]]
 
 cf_all <- coef(summary(fit_sel))$cond[, 1]
@@ -2183,18 +1887,18 @@ vc_all <- vcov(fit_sel)$cond
 pref <- paste0("^cb_", var, "_")
 
 idx_beta <- grep(pref, names(cf_all))
-if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+if (length(idx_beta) == 0) stop("Could not find cb_ coefficients for var='", var, "'.")
 beta <- cf_all[idx_beta]
 
 idx_rows <- grep(pref, rownames(vc_all))
 idx_cols <- grep(pref, colnames(vc_all))
 V <- vc_all[idx_rows, idx_cols, drop = FALSE]
 
-# Checagens
-if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
-if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+# Checks
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Check cb_templates and the model.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV does not match ncol(cb).")
 
-# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+# --------------------- 3) crosspred: Δη by lag vs cen=P50_var ----------------
 cp <- dlnm::crosspred(
   cb,
   coef  = beta,
@@ -2204,9 +1908,9 @@ cp <- dlnm::crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+mf <- cp$matfit  # Δη (link) by lag; rows=at_vals, columns=lags
 
-# Ordenar lags
+# Sort lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
 if (anyNA(lag_idx)) {
   lag_idx <- 0:(ncol(mf) - 1)
@@ -2216,18 +1920,18 @@ ord <- order(lag_idx)
 mf <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
-# manter 0..lag_max_plot
+# keep 0..lag_max_plot
 keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf <- mf[, keep, drop = FALSE]
 lag_idx <- lag_idx[keep]
 
-# --------------------- 4) Baseline coerente (cenário de referência conjunto) -
-# Referências (P50) para TODAS as variáveis do modelo
+# --------------------- 4) Consistent baseline (joint P50 scenario) ------------
+# References (P50) for ALL model variables
 P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
 P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
 P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
 
-# n_ref (comprimento típico)
+# n_ref (typical series length)
 n_ref <- wx_use %>%
   filter(!is.na(tmax)) %>%
   count(epi_id) %>%
@@ -2235,14 +1939,14 @@ n_ref <- wx_use %>%
   stats::median() %>%
   as.integer()
 
-# nomes cb_* no dat
+# cb_* names in dat
 nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
 nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
 nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
 
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
-# função: última linha do crossbasis para série constante
+# function: last crossbasis row for constant series
 last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
   x <- rep(value, n_ref)
   cbx <- dlnm::crossbasis(
@@ -2253,30 +1957,30 @@ last_cb_row <- function(value, cb_template, LAG_MAX, n_ref) {
   as.numeric(cbx[n_ref, ])
 }
 
-# cb "última linha" no cenário de referência
+# cb "last line" in the reference scenario
 bt0 <- last_cb_row(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
 br0 <- last_cb_row(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
 bv0 <- last_cb_row(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
 
-# newdata referência (1 linha)
+# reference newdata
 nd0 <- data.frame(siteyear = NA)
 nd0[nm_t] <- as.list(bt0)
 nd0[nm_r] <- as.list(br0)
 nd0[nm_v] <- as.list(bv0)
 
-# baseline pop-level (efeitos aleatórios zerados)
+# baseline pop-level (random effects set to zero)
 sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
 
-# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+# --------------------- 5) Convert cumulative Δη 0→L into final severity -----
 mf_cum <- t(apply(mf, 1, cumsum))
 
 SEV_mat <- plogis(qlogis(sev_base) + mf_cum)      # 0–1
 SEVpct_mat <- 100 * SEV_mat                       # 0–100
 
-# (opcional) diferença absoluta vs baseline (em pontos percentuais)
+# (Optional) Absolute difference vs. baseline (in percentage points)
 SEVdiffpct_mat <- 100 * (SEV_mat - sev_base)
 
-# (opcional) Odds Ratio acumulado (logit): OR = exp(Δη_cum)
+# (optional) Accumulated Odds Ratio (logit): OR = exp(Δη_cum)
 OR_mat <- exp(mf_cum)
 
 # --------------------- 6) Data frames long (heatmap) -------------------------
@@ -2329,7 +2033,7 @@ library(ggplot2)
 library(tidyr)
 
 # ==============================================================
-# 1) EXTRAIR COEFICIENTES
+# 1) EXTRACT COEFFICIENTS
 # ==============================================================
 
 var <- "vpd"
@@ -2346,26 +2050,26 @@ stopifnot(length(beta) == ncol(cb))
 stopifnot(nrow(vc_sub) == ncol(cb))
 
 # ==============================================================
-# 2) DEFINIR GRID E FAIXA DE TMEAN PARA O HEATMAP
+# 2) DEFINE GRID AND TMEAN RANGE FOR THE HEATMAP
 # ==============================================================
 
 x_all <- wx_use[[var]]
 P50   <- quantile(x_all, 0.50, na.rm = TRUE)
 
-# grid usado pelo DLNM
+# Grid used by DLNM
 grid <- sort(unique(as.numeric(quantile(
   x_all, seq(0.05, 0.95, by = 0.01), na.rm = TRUE
 ))))
 
-# valores desejados para o heatmap (26 a 30 °C)
+# Desired values for the heatmap (0.5 to 1.5 kPa)
 #at_vals <- seq(1, 2, length.out = 10000)
 at_vals <- seq(0.50, 1.5, length.out = 10000)
 
-# ajustar ao range REAL do grid (evita extrapolação)
+# Adjust to the REAL grid range (avoids extrapolation)
 at_vals <- at_vals[at_vals >= min(grid) & at_vals <= max(grid)]
 
 # ==============================================================
-# 3) crosspred EM TODOS OS at_vals (lag‑móvel)
+# 3) crosspred IN ALL at-vals (mobile lag)
 # ==============================================================
 
 cp <- crosspred(
@@ -2377,15 +2081,15 @@ cp <- crosspred(
   bylag = 1
 )
 
-# matriz: linhas = valores de tmean; colunas = lags
+# matrix: rows = tmean values; columns = lags
 mf <- cp$matfit
 
-# criar vetor de lags
+# create lag vectors
 lag_idx <- suppressWarnings(as.integer(gsub("lag","",colnames(mf))))
 if (anyNA(lag_idx)) lag_idx <- 0:(ncol(mf)-1)
 
 # ==============================================================
-# 4) Converter para RR(lag) e depois % (% change)
+# 4) Convert to RR (lag) and then % (% change)
 # ==============================================================
 
 RR_mat   <- exp(mf)
@@ -2430,36 +2134,29 @@ library(ggplot2)
 library(dplyr)
 library(scales)
 
-# 2a) (opcional mas muito útil) "aparar" outliers para a escala de cor
-#     e forçar limites simétricos ao redor de zero:
 lims <- quantile(df_heat$PERC, c(0.02, 0.98), na.rm = TRUE)
 max_abs <- max(abs(lims))
 df_plot <- df_heat %>%
-  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  # winsoriza coloração
+  mutate(PERC_c = pmax(pmin(PERC,  max_abs), -max_abs))  
 
-# 2b) Heatmap + isolinhas
+
 vpd_movel = df_plot %>% 
 ggplot(aes(x = lag, y = tmean_val, fill = PERC_c)) +
-  # raster interpolado fica mais liso na tela
   geom_raster(interpolate = TRUE) +
-  # isolinhas (0% e ±5, ±10, ±15...) – ajuste 'breaks' conforme seus dados
   geom_contour(aes(z = PERC), color = "black", size = 0.25,
                breaks = c(-15, -10, -5, 0, 5, 10, 15)) +
-  # rótulo só na isolinha zero (neutro) para guiar leitura
   geom_text_contour(aes(z = PERC), breaks = 0, stroke = 0.15,
                     label.padding = unit(0.15, "lines"), size = 3.2) +
-  # paleta perceptual e centrada no 0 (diverging)
 scale_fill_gradient2(
   low = "#2c7bb6", mid = "white", high = "#d7191c",
   midpoint = 0, limits = c(-max_abs, max_abs),
   oob = squish,
   name = "RR (%)",
   guide = guide_colorbar(
-    barwidth  = unit(4, "cm"),  # << AQUI você estica
-    barheight = unit(0.5, "cm")  # espessura da barra
+    barwidth  = unit(4, "cm"),  
+    barheight = unit(0.5, "cm") 
   )
 ) +
-  # eixos e guias
   scale_x_continuous(trans = "reverse",
     breaks = pretty(df_plot$lag, n = 8), expand = c(0, 0)) +
   scale_y_continuous(breaks = pretty(df_plot$tmean_val, n = 6), expand = c(0, 0)) +
@@ -2509,24 +2206,24 @@ suppressPackageStartupMessages({
 })
 
 # ============================================================
-# PRÉ-REQUISITOS (devem existir no ambiente):
-#   fit_sel      : glmmTMB beta-logit já ajustado
-#   dat          : data.frame usado no ajuste (com colunas cb_*)
-#   wx_use       : dados climáticos (epi_id, tmax, rain_cum, vpd)
-#   cb_templates : lista com templates crossbasis (tmax, rain_cum, vpd)
-#   LAG_MAX      : lag máximo (ex.: 85)
+# PREREQUISITES (must exist in the environment):
+#   fit_sel      : fitted beta-logit glmmTMB model
+#   dat          : data.frame used for fitting (with cb_* columns)
+#   wx_use       : weather data (epi_id, tmax, rain_cum, vpd)
+#   cb_templates : list with crossbasis templates (tmax, rain_cum, vpd)
+#   LAG_MAX      : maximum lag (e.g., 85)
 # ============================================================
 stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"),
           exists("cb_templates"), exists("LAG_MAX"))
 
 # ------------------------------------------------------------
-# 1) UTILITÁRIOS
+# 1) UTILITIES
 # ------------------------------------------------------------
 get_cb_names <- function(dat, var) {
   grep(paste0("^cb_", var, "_"), names(dat), value = TRUE)
 }
 
-# comprimento típico da série por epidemia
+# typical time series length per epidemic
 n_ref <- wx_use %>%
   filter(!is.na(vpd)) %>%
   count(epi_id) %>%
@@ -2534,10 +2231,10 @@ n_ref <- wx_use %>%
   median() %>%
   as.integer()
 
-# garante suporte para todos os lags
+# ensure support for all lags
 n_ref <- max(n_ref, LAG_MAX + 1)
 
-# cria série diária com valor "val" apenas na banda de lag
+# create a daily series with value "value" only within the lag band
 make_series_band <- function(value, cen, n_ref, band = NULL) {
   x <- rep(cen, n_ref)
   if (!is.null(band)) {
@@ -2551,7 +2248,7 @@ make_series_band <- function(value, cen, n_ref, band = NULL) {
   x
 }
 
-# extrai a última linha da crossbasis
+# extract the last row of the crossbasis
 last_cb_row <- function(x, cb_template, LAG_MAX) {
   cbx <- dlnm::crossbasis(
     x, lag = LAG_MAX,
@@ -2561,7 +2258,7 @@ last_cb_row <- function(x, cb_template, LAG_MAX) {
   as.numeric(cbx[length(x), ])
 }
 
-# predição manual (pop-level; beta-logit)
+# manual prediction (population-level; beta-logit)
 predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
   eta <- unname(beta["(Intercept)"]) +
     sum(unname(beta[nm_t]) * bt) +
@@ -2572,7 +2269,7 @@ predict_eta_mu <- function(bt, br, bv, beta, nm_t, nm_r, nm_v) {
 }
 
 # ------------------------------------------------------------
-# 2) NOMES DAS COLUNAS cb_* NO MODELO
+# 2) COLUMN NAMES cb_* IN THE MODEL
 # ------------------------------------------------------------
 nm_t <- get_cb_names(dat, "tmax")
 nm_r <- get_cb_names(dat, "rain_cum")
@@ -2580,7 +2277,7 @@ nm_v <- get_cb_names(dat, "vpd")
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
 # ------------------------------------------------------------
-# 3) COEFICIENTES FIXOS
+# 3) FIXED COEFFICIENTS
 # ------------------------------------------------------------
 beta <- fixef(fit_sel)$cond
 stopifnot(all(c("(Intercept)", nm_t, nm_r, nm_v) %in% names(beta)))
@@ -2592,7 +2289,7 @@ cen_t <- as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE))
 cen_r <- as.numeric(quantile(wx_use$rain_cum, 0.50, na.rm = TRUE))
 cen_v <- as.numeric(quantile(wx_use$vpd,      0.50, na.rm = TRUE))
 
-# séries baseline
+# baseline series
 xt0 <- make_series_band(cen_t, cen_t, n_ref, band = NULL)
 xr0 <- make_series_band(cen_r, cen_r, n_ref, band = NULL)
 xv0 <- make_series_band(cen_v, cen_v, n_ref, band = NULL)
@@ -2601,21 +2298,21 @@ bt0 <- last_cb_row(xt0, cb_templates[["tmax"]],     LAG_MAX)
 br0 <- last_cb_row(xr0, cb_templates[["rain_cum"]], LAG_MAX)
 bv0 <- last_cb_row(xv0, cb_templates[["vpd"]],      LAG_MAX)
 
-# severidade baseline
+# baseline severity
 base <- predict_eta_mu(bt0, br0, bv0, beta, nm_t, nm_r, nm_v)
 sev_base_pct <- 100 * base["mu"]
 
 # ------------------------------------------------------------
-# 5) GRID DE VPD
+# 5) VPD GRID
 # ------------------------------------------------------------
 v_grid <- seq(0, 2.0, length.out = 200)
 
-# janelas
+# periods
 band_later   <- 0:40      # Later
 band_earlier <- 41:85     # Earlier
 
 # ------------------------------------------------------------
-# 6) FUNÇÃO PARA CALCULAR CURVA POR JANELA
+# 6) FUNCTION TO COMPUTE CURVES BY PERIOD
 # ------------------------------------------------------------
 calc_curve_phase_vpd <- function(values, band) {
   sapply(values, function(val) {
@@ -2636,7 +2333,7 @@ calc_curve_phase_vpd <- function(values, band) {
 }
 
 # ------------------------------------------------------------
-# 7) CALCULAR AS DUAS CURVAS
+# 7) COMPUTE BOTH CURVES
 # ------------------------------------------------------------
 sev_vpd_later   <- calc_curve_phase_vpd(v_grid, band_later)
 sev_vpd_earlier <- calc_curve_phase_vpd(v_grid, band_earlier)
@@ -2685,19 +2382,19 @@ sev_vpd
 
 ```{r}
 # ==============================================================
-# DLNM heatmap / curvas por bandas (GLMMTMB beta logit)
-# - Efeito de uma variável (ex.: tmax) ao longo dos lags
-# - BASELINE coerente com o "cen" do DLNM:
-#     baseline = predição pop-level no cenário de referência:
+# DLNM heatmap / curves by lag bands (GLMMTMB beta-logit)
+# - Effect of a single variable (e.g., tmax) across lags
+# - BASELINE consistent with the DLNM "cen":
+#     baseline = population-level prediction under the reference scenario:
 #       tmax = P50(tmax), rain_cum = P50(rain_cum), vpd = P50(vpd)
-# - Converte efeito acumulado (Δη 0→L) em severidade (%) via logit
+# - Converts cumulative effect (Δη 0→L) into severity (%) via logit
 # ==============================================================
-# Entradas esperadas no ambiente:
+# Expected inputs in the environment:
 #   fit_sel      : glmmTMB beta_family(link="logit")
-#   dat          : data.frame usado no ajuste (contém colunas cb_*)
-#   cb_templates : lista com crossbasis usados no ajuste (tmax, rain_cum, vpd)
-#   wx_use       : data.frame/objeto com séries originais contendo epi_id e colunas tmax, rain_cum, vpd
-#   LAG_MAX      : lag máximo usado no crossbasis
+#   dat          : data.frame used for model fitting (contains cb_* columns)
+#   cb_templates : list with crossbasis objects used in fitting (tmax, rain_cum, vpd)
+#   wx_use       : data.frame/object with original time series containing epi_id and columns tmax, rain_cum, vpd
+#   LAG_MAX      : maximum lag used in the crossbasis
 # ==============================================================
 
 suppressPackageStartupMessages({
@@ -2709,42 +2406,38 @@ suppressPackageStartupMessages({
   library(scales)
 })
 
-# --------------------- 0) Checagens ---------------------------
+# --------------------- 0) Checks ---------------------------
 stopifnot(exists("fit_sel"), exists("dat"), exists("cb_templates"),
           exists("wx_use"), exists("LAG_MAX"))
 
-# --------------------- 1) Parâmetros --------------------------
-var <- "vpd"   # alvo fixo aqui
+# --------------------- 1) Parameters --------------------------
+var <- "vpd"   
 
-if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] não existe.")
+if (is.null(cb_templates[[var]])) stop("cb_templates[['", var, "']] does not exist.")
 if (!all(c("tmax","rain_cum","vpd") %in% names(cb_templates))) {
-  stop("cb_templates precisa conter: 'tmax', 'rain_cum', 'vpd'.")
+  stop("cb_templates must contain: 'tmax', 'rain_cum', 'vpd'.")
 }
 
 x_all <- wx_use[[var]]
-if (is.null(x_all)) stop("wx_use[['", var, "']] não existe.")
+if (is.null(x_all)) stop("wx_use[['", var, "']] does not exist.")
 
-# "cen" do DLNM: P50 da variável-alvo
+# DLNM "cen": P50 of the target variable
 P50_var <- as.numeric(quantile(x_all, 0.50, na.rm = TRUE))
 
-# --------------------------------------------------------------
-# ✅ IMPORTANTE: manter intervalo completo 0.66–2.0
-# (sem cortar por P05–P95)
-# --------------------------------------------------------------
 at_vals <- seq(0.50, 2.0, length.out = 1000)
 
-# (opcional) aviso se houver extrapolação fora do range observado
+# trim the range to the observed interval to avoid extrapolation
 rng_obs <- range(x_all, na.rm = TRUE)
 if (min(at_vals) < rng_obs[1] || max(at_vals) > rng_obs[2]) {
-  message("ATENÇÃO: at_vals inclui valores fora do range observado: ",
-          "range observado = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
+  message("WARNING: at_vals includes values outside the observed range: ",
+          "observed range = [", round(rng_obs[1],2), ", ", round(rng_obs[2],2), "]")
 }
 
-# Lags para plot
+# Lags for plotting
 lag_max_plot <- 85L
 lag_max_plot <- min(lag_max_plot, LAG_MAX)
 
-# --------------------- 2) Coefs/VCOV apenas do bloco cb_vpd ------------------
+# --------------------- 2) Coefs/VCOV only for cb_vpd block------------------
 cb <- cb_templates[[var]]
 
 cf_all <- coef(summary(fit_sel))$cond[, 1]
@@ -2753,7 +2446,7 @@ vc_all <- vcov(fit_sel)$cond
 pref <- paste0("^cb_", var, "_")
 
 idx_beta <- grep(pref, names(cf_all))
-if (length(idx_beta) == 0) stop("Não encontrei coeficientes cb_ para var='", var, "'.")
+if (length(idx_beta) == 0) stop("Could not find cb_ coefficients for var='", var, "'.")
 beta <- cf_all[idx_beta]
 
 idx_rows <- grep(pref, rownames(vc_all))
@@ -2761,10 +2454,10 @@ idx_cols <- grep(pref, colnames(vc_all))
 V <- vc_all[idx_rows, idx_cols, drop = FALSE]
 
 # Checagens
-if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). Verifique cb_templates e o modelo.")
-if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV não bate com ncol(cb).")
+if (length(beta) != ncol(cb)) stop("length(beta) != ncol(cb). check cb_templates and model.")
+if (!(nrow(V) == ncol(cb) && ncol(V) == ncol(cb))) stop("VCOV does not match ncol(cb).")
 
-# --------------------- 3) crosspred: Δη por lag vs cen=P50_var ----------------
+# --------------------- 3) crosspred: Δη by lag vs cen=P50_var ----------------
 cp <- dlnm::crosspred(
   cb,
   coef  = beta,
@@ -2774,9 +2467,9 @@ cp <- dlnm::crosspred(
   bylag = 1
 )
 
-mf <- cp$matfit  # Δη (link) por lag; linhas=at_vals, colunas=lags
+mf <- cp$matfit  # Δη (link) by lag; rows=at_vals, columns=lags
 
-# Ordenar lags
+# Sort lags
 lag_idx <- suppressWarnings(as.integer(gsub("lag", "", colnames(mf))))
 if (anyNA(lag_idx)) {
   lag_idx <- 0:(ncol(mf) - 1)
@@ -2786,17 +2479,18 @@ ord <- order(lag_idx)
 mf <- mf[, ord, drop = FALSE]
 lag_idx <- lag_idx[ord]
 
-# manter 0..lag_max_plot
+# keep 0..lag_max_plot
 keep <- which(lag_idx >= 0 & lag_idx <= lag_max_plot)
 mf <- mf[, keep, drop = FALSE]
 lag_idx <- lag_idx[keep]
 
-# --------------------- 4) Baseline coerente (cenário conjunto P50) ------------
+# --------------------- 4) Consistent baseline (joint P50 scenario) ------------
+# References (P50) for ALL model variables
 P50_t <- as.numeric(quantile(wx_use[["tmax"]],     0.50, na.rm = TRUE))
 P50_r <- as.numeric(quantile(wx_use[["rain_cum"]], 0.50, na.rm = TRUE))
 P50_v <- as.numeric(quantile(wx_use[["vpd"]],      0.50, na.rm = TRUE))
 
-# n_ref (comprimento típico)
+# n_ref (typical series length)
 n_ref <- wx_use %>%
   filter(!is.na(tmax)) %>%
   count(epi_id) %>%
@@ -2806,13 +2500,13 @@ n_ref <- wx_use %>%
 
 n_ref <- max(n_ref, LAG_MAX + 1)
 
-# nomes cb_* no dat
+# cb_* names in dat
 nm_t <- grep("^cb_tmax_",     names(dat), value = TRUE)
 nm_r <- grep("^cb_rain_cum_", names(dat), value = TRUE)
 nm_v <- grep("^cb_vpd_",      names(dat), value = TRUE)
 stopifnot(length(nm_t) > 0, length(nm_r) > 0, length(nm_v) > 0)
 
-# última linha do crossbasis para série constante
+# function: last crossbasis row for constant series
 last_cb_row_const <- function(value, cb_template, LAG_MAX, n_ref) {
   x <- rep(value, n_ref)
   cbx <- dlnm::crossbasis(
@@ -2827,20 +2521,20 @@ bt0 <- last_cb_row_const(P50_t, cb_templates[["tmax"]],     LAG_MAX, n_ref)
 br0 <- last_cb_row_const(P50_r, cb_templates[["rain_cum"]], LAG_MAX, n_ref)
 bv0 <- last_cb_row_const(P50_v, cb_templates[["vpd"]],      LAG_MAX, n_ref)
 
-# newdata referência (1 linha) — use level válido
+# reference newdata
 nd0 <- data.frame(siteyear = dat$siteyear[1])
 nd0[nm_t] <- as.list(bt0)
 nd0[nm_r] <- as.list(br0)
 nd0[nm_v] <- as.list(bv0)
 
-# baseline pop-level (efeitos aleatórios zerados)
+# baseline pop-level (random effects set to zero)
 sev_base <- as.numeric(predict(fit_sel, newdata = nd0, type = "response", re.form = NA))
 
-# --------------------- 5) Converter Δη acumulado 0→L em severidade final -----
+# --------------------- 5) Convert cumulative Δη 0→L into final severity -----
 mf_cum <- t(apply(mf, 1, cumsum))
 
 SEV_mat <- plogis(qlogis(sev_base) + mf_cum)         # 0–1
-SEVdiff_pp <- 100 * (SEV_mat - sev_base)             # pontos percentuais (pp)
+SEVdiff_pp <- 100 * (SEV_mat - sev_base)             # percentage point (pp)
 
 # --------------------- 6) Data frame long (heatmap Δpp) -----------------------
 df_diff <- as.data.frame(SEVdiff_pp)
@@ -2851,7 +2545,7 @@ df_diff <- df_diff %>%
   pivot_longer(starts_with("lag_"), names_to = "lag", values_to = "SEV_diff_pp") %>%
   mutate(lag = as.integer(gsub("lag_", "", lag)))
 
-# --------------------- 7) Heatmap (Δ em pp) ----------------------------------
+# --------------------- 7) Heatmap (Δ in pp) ----------------------------------
 p_heat_diff_vpd <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp)) +
   geom_raster() +
   scale_fill_viridis_c(name = "Δ (pp)") +
@@ -3137,19 +2831,19 @@ suppressPackageStartupMessages({
 })
 
 # =========================
-# PRÉ-REQUISITOS
+# PRE-REQUISITES
 # =========================
 stopifnot(exists("fit_sel"), exists("dat"), exists("wx_use"), exists("cb_templates"), exists("LAG_MAX"))
 
 # -------------------------
-# Janelas (lags)
+# periods (lags)
 # -------------------------
 LAG_BAND_LATER   <- 0:40          # Later
 LAG_BAND_EARLIER <- 41:LAG_MAX    # Earlier
 N <- LAG_MAX + 1
 
 # -------------------------
-# Baseline (P50) — usado como referência (não para substituir seus cenários)
+# Baseline (P50) — used as a reference (not to replace your scenarios)
 # -------------------------
 base_vals <- list(
   tmax     = as.numeric(quantile(wx_use$tmax,     0.50, na.rm = TRUE)),
@@ -3158,7 +2852,7 @@ base_vals <- list(
 )
 
 # -------------------------
-# Funções auxiliares (cenários por janelas)
+# Auxiliary functions (scenarios by periods)
 # -------------------------
 lags_to_idx <- function(N, lags) {
   idx <- N - lags
@@ -3234,13 +2928,13 @@ predict_two_window_scenario <- function(fit_sel, dat, cb_templates,
     pred <- predict(fit_sel, newdata = nd, type = "response")
   }
 
-  as.numeric(pred) # retorna em (0,1)
+  as.numeric(pred) # return (0,1)
 }
 
 # =========================
-# DEFINIÇÕES DOS CENÁRIOS
+# Scenarios definition
 # =========================
-# chuva por janela:
+# rain per period:
 # HH: earlier=400 later=400
 # HB: earlier=400 later=100
 # BH: earlier=100 later=400
@@ -3255,7 +2949,7 @@ rain_scenarios <- tibble::tribble(
 ) %>%
   mutate(scenario = factor(scenario, levels = c("HH","HL","LH","LL")))
 
-# níveis de VPD (linhas dentro do painel)
+# VPD levels (lines inside the plot)
 vpd_levels <- tibble::tribble(
   ~vpd_level, ~vpd_value,
   "Low",      0.6,
@@ -3264,11 +2958,11 @@ vpd_levels <- tibble::tribble(
 ) %>%
   mutate(vpd_level = factor(vpd_level, levels = c("Low","Medium","High")))
 
-# grid de temperatura
+# temperature grid
 t_grid <- seq(19, 34, length.out = 800)
 
 # =========================
-# BASELINE SEVERITY (P50/P50/P50)
+# SEVERITY BASELINE (P50/P50/P50)
 # =========================
 sev_base <- predict_two_window_scenario(
   fit_sel, dat, cb_templates,
@@ -3280,7 +2974,7 @@ sev_base <- predict_two_window_scenario(
 sev_base_pct <- 100 * sev_base
 
 # =========================
-# GERAR A GRADE DE PREDIÇÕES
+# GENERATE THE PREDICTION GRID
 # =========================
 pred_df <- expand.grid(
   scenario = levels(rain_scenarios$scenario),
@@ -3297,19 +2991,19 @@ pred_df <- expand.grid(
     vpd_level = factor(vpd_level, levels = c("Low","Medium","High"))
   )
 
-# função para prever 1 linha
+# function to predict 1 row
 predict_row <- function(tmax_val, rain_earlier, rain_later, vpd_val) {
 
   scen_later <- list(
-    tmax     = tmax_val,     # tmax aplicado na janela Later
+    tmax     = tmax_val,     # tmax applied to the side period
     rain_cum = rain_later,
     vpd      = vpd_val
   )
 
   scen_earlier <- list(
-    tmax     = tmax_val,     # tmax aplicado na janela Earlier (mesmo valor)
+    tmax     = tmax_val,     # tmax applied in the Earlier period (same value)
     rain_cum = rain_earlier,
-    vpd      = vpd_val       # vpd também constante nas duas janelas
+    vpd      = vpd_val       # vpd also constant in both period
   )
 
   100 * predict_two_window_scenario(
@@ -3321,16 +3015,14 @@ predict_row <- function(tmax_val, rain_earlier, rain_later, vpd_val) {
   )
 }
 
-# aplicar previsão para todas as combinações
+# apply prediction to all combinations.
 pred_df$sev_pct <- purrr::pmap_dbl(
   list(pred_df$tmax, pred_df$rain_earlier, pred_df$rain_later, pred_df$vpd_value),
   predict_row
 )
 
 #writexl::write_xlsx(pred_df,"data/pred_df.xlsx")
-# =========================
-# PLOT 2×2 (facet) + 3 linhas (VPD)
-# =========================
+
 p <- pred_df %>%
   filter(!vpd_level == "Low") %>% 
   ggplot(aes(x = tmax, y = sev_pct, color = vpd_level)) +
@@ -3368,7 +3060,7 @@ print(p)
 ```{r}
 weather_data <- epi %>%
   mutate(
-    # Criando a data permitida diretamente com base no estado
+    # Creating the allowed date directly based on the state
     allowed_date = case_when(
       state == "MT" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")), 
       state == "MS" ~ as.Date(paste0(format(planting_date, "%Y"), "-09-16")),
@@ -3379,13 +3071,13 @@ weather_data <- epi %>%
       state == "BA" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")),
       state == "MG" ~ as.Date(paste0(format(planting_date, "%Y"), "-10-01")) 
     ),
-    # Ajustando o ano da allowed_date para casos de janeiro e fevereiro
+    # Adjusting the allowed_date year for January and February cases.
     allowed_date = if_else(
       format(planting_date, "%m") %in% c("01", "02"), 
       as.Date(paste0(as.numeric(format(planting_date, "%Y")) - 1, "-", format(allowed_date, "%m-%d"))),
       allowed_date
     ),
-    # Calculando a diferença em dias
+    # Calculating the difference in days
     days_difference = as.numeric(planting_date - allowed_date)
   )
 ```
@@ -3406,7 +3098,7 @@ p_states <- crossing(points, year = years)
 
 p_states <- p_states %>%
   mutate(
-    # Criando a data permitida diretamente com base no estado
+    # Creating the allowed date directly based on the state
     allowed_date = case_when(
       state == "MT" ~ as.Date(paste0(format(year), "-09-16")), 
       state == "MS" ~ as.Date(paste0(format(year), "-09-16")),
@@ -3460,27 +3152,22 @@ max(p_states$PD85)
 
 ### TMAX
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+# RAM
 chunk_size <- 5000
 
 # =========================================================
-# 2) PREPARAR p_states
+# 2) PREPARE p_states
 # =========================================================
 p_states_dt <- as.data.table(p_states)
 
@@ -3489,17 +3176,17 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+# keep only valid lines
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+# ensure a maximum period of 85 days
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
 # =========================================================
-# 3) LER O NetCDF UMA VEZ
+# 3) READ NetCDF ONCE
 # =========================================================
 r <- rast(nc_path)
 
@@ -3510,30 +3197,30 @@ if (all(is.na(dates_all))) {
 
 layer_names <- names(r)
 
-# CRS do raster
+# Raster CRS
 r_crs <- crs(r)
 
 # =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# 4) FUNCTION TO PROCESS ONE YEAR
 # =========================================================
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  # minimum interval required for this year
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  # strictly necessary raster layers
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -3541,12 +3228,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  # output (year)
   out_file <- file.path(out_dir, paste0("tmax_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  # Remove if it already exists.
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -3558,19 +3245,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    # Create spatial vector
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    # redesign if necessary
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    # extraction
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -3580,10 +3267,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    # Add pt_id in the same order as the chunk
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo sem usar pivot_longer
+    # long format without using pivot_longer
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -3592,17 +3279,17 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    # map dates
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    # rename extracted coordinates
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    # combine dates of interest from the point
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    # filter actual point period
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
@@ -3611,7 +3298,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # Kelvin -> Celsius se necessário
+    # Kelvin -> Celsius
     if (nrow(long_dt) > 0) {
       media_tmax <- mean(long_dt$tmax, na.rm = TRUE)
       if (!is.na(media_tmax) && media_tmax > 100) {
@@ -3619,12 +3306,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       }
     }
 
-    # selecionar colunas finais
+    # select final columns
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, tmax, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    # record incrementally
     fwrite(
       long_dt,
       file = out_file,
@@ -3632,7 +3319,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+    # clear memory
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
@@ -3642,7 +3329,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 }
 
 # =========================================================
-# 5) RODAR ANO A ANO
+# 5) ROLLING YEAR AFTER YEAR
 # =========================================================
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
@@ -3662,13 +3349,13 @@ for (yr in years_to_run) {
     chunk_size = chunk_size
   )
 
-  # limpar
+  # clean
   rm(pts_year)
   gc(verbose = FALSE)
 }
 
 # =========================================================
-# 6) JUNTAR TODOS OS ANOS
+# 6) COLLECT EVERY YEAR
 # =========================================================
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
@@ -3690,9 +3377,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -3706,27 +3393,22 @@ dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/
 
 ### RAIN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+# RAM
 chunk_size <- 5000
 
 # =========================================================
-# 2) PREPARAR p_states
+# 2) PREPARE p_states
 # =========================================================
 p_states_dt <- as.data.table(p_states)
 
@@ -3735,17 +3417,17 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+# keep only valid lines
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+# ensure a maximum period of 85 days
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
 # =========================================================
-# 3) LER O NetCDF UMA VEZ
+# 3) READ NetCDF ONCE
 # =========================================================
 r <- rast(nc_path)
 
@@ -3756,30 +3438,30 @@ if (all(is.na(dates_all))) {
 
 layer_names <- names(r)
 
-# CRS do raster
+# Raster CRS
 r_crs <- crs(r)
 
 # =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
+# 4) FUNCTION TO PROCESS ONE YEAR
 # =========================================================
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  # minimum interval required for this year
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  # strictly necessary raster layers
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -3787,12 +3469,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  # output (year)
   out_file <- file.path(out_dir, paste0("prcp_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  # remove if it already exists
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -3804,19 +3486,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    # create spatial vector
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    # redesign if necessary
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    # extraction
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -3826,10 +3508,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    # Add pt_id in the same order as the chunk
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo
+    # long format
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -3838,17 +3520,17 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    # map dates
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    # rename extracted coordinates
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    # combine dates of interest from the point
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    # filter actual point period
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
@@ -3858,26 +3540,26 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
     # =====================================================
-    # AJUSTE DE UNIDADE DA CHUVA, SE NECESSÁRIO
+    # Adjust the rainfall unit if necessary.
     # =====================================================
-    # ERA5-Land daily precipitation pode vir em metros (m)
-    # Se os valores estiverem muito pequenos, converte para mm
+    # ERA5-Land daily precipitation can be in meters (m)
+    # If the values are too small, convert to mm.
     if (nrow(long_dt) > 0) {
       media_prcp <- mean(long_dt$prcp, na.rm = TRUE)
 
-      # regra prática:
-      # se a média for menor que 1, é bem provável que esteja em metros
+      # practical rule:
+      # If the average is less than 1, it's very likely that it's in meters.
       if (!is.na(media_prcp) && media_prcp < 1) {
         long_dt[, prcp := prcp]
       }
     }
 
-    # selecionar colunas finais
+    # select final columns
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, prcp, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    # record incrementally
     fwrite(
       long_dt,
       file = out_file,
@@ -3885,7 +3567,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+    # clena memory
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
@@ -3895,7 +3577,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 }
 
 # =========================================================
-# 5) RODAR ANO A ANO
+# 5) ROLLING YEAR AFTER YEAR
 # =========================================================
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
@@ -3920,7 +3602,7 @@ for (yr in years_to_run) {
 }
 
 # =========================================================
-# 6) JUNTAR TODOS OS ANOS
+# 6) COLLECT EVERY YEAR
 # =========================================================
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
@@ -3942,9 +3624,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -3959,28 +3641,22 @@ dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/
 
 ### TMEAN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -3995,27 +3671,23 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -4079,7 +3751,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
     # =====================================================
-    # Kelvin -> Celsius (IMPORTANTE)
+    # Kelvin -> Celsius (IMPORTANT)
     # =====================================================
     if (nrow(long_dt) > 0) {
       media_tmean <- mean(long_dt$tmean, na.rm = TRUE)
@@ -4107,7 +3779,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 }
 
 # =========================================================
-# 5) LOOP POR ANO
+# 5) LOOP PER YEAR
 # =========================================================
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
@@ -4128,7 +3800,7 @@ for (yr in years_to_run) {
 }
 
 # =========================================================
-# 6) JUNTAR TUDO
+# 6) PUT IT ALL TOGETHER
 # =========================================================
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
@@ -4166,28 +3838,22 @@ dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearl
 ```
 ### RH
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -4202,27 +3868,23 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -4286,9 +3948,9 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
     # =====================================================
-    # CHECAGEM OPCIONAL DE UNIDADE
+    # OPTIONAL UNIT CHECK
     # =====================================================
-    # Se RH estiver em fração (0-1), converte para %
+    # If RH is a fraction (0-1), convert it to %.
     if (nrow(long_dt) > 0) {
       media_rh <- mean(long_dt$rh, na.rm = TRUE)
 
@@ -4315,7 +3977,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 }
 
 # =========================================================
-# 5) LOOP POR ANO
+# 5) LOOP PER YEAR
 # =========================================================
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
@@ -4336,7 +3998,7 @@ for (yr in years_to_run) {
 }
 
 # =========================================================
-# 6) JUNTAR TUDO
+# 6) PUT IT ALL TOGETHER
 # =========================================================
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
@@ -4361,7 +4023,7 @@ if (length(valid_files) > 0) {
     gc()
   }
 
-  cat("Arquivo final salvo em:", final_file, "\n")
+  cat("Final file saved in:", final_file, "\n")
 }
 ```
 
@@ -4541,20 +4203,20 @@ max(p_state_overall$date)
 
 ### All variables
 ```{r, echo=TRUE, eval=FALSE}
-# --- Dados observados ---
-wx_use      # dados longos observados
-dat         # banco final do modelo (com cb_*)
-fit_sel     # modelo glmmTMB ajustado
+# --- Observed data ---
+wx_use      # long observed data
+dat         # final model bank (with cb_*)
+fit_sel     # glmmTMB fitted model
 
-# --- Dados ERA5 ---
-p_state_overall   # ERA5 limpo, alinhado, com dpp = 0:85 completos
+# --- ERA5 dataset ---
+p_state_overall   # ERA5 clean, aligned, with dpp = 0.85 complete
 
-# --- Parâmetros do modelo ---
+# --- Model parameters ---
 VARS       <- c("tmax", "rain_cum", "vpd")
 LAG_MAX    <- 85
-DF_VAR     <- 4      # ou o valor que você usou
+DF_VAR     <- 4      
 DF_LAG     <- 4
-SEPARATOR  <- 10     # exatamente o mesmo do ajuste
+SEPARATOR  <- 10     
 
 
 
@@ -4565,7 +4227,7 @@ library(dlnm)
 library(ggplot2)
 
 # =========================================================
-# 1) CRIAR cb_templates (A PARTIR DO OBSERVADO)
+# 1) Create CV templates (from the observer)
 # =========================================================
 
 build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
@@ -4601,7 +4263,7 @@ for (v in VARS) {
 }
 
 # =========================================================
-# 2) PREPARAR ERA5 COMO "EPIDEMIAS"
+# 2) PREPARING FOR ERA 5 LIKE "EPIDEMICS"
 # =========================================================
 
 era5_long <- p_state_overall %>%
@@ -4617,18 +4279,18 @@ era5_long <- era5_long %>%
   ungroup()
 
 # =========================================================
-# 3) FUNÇÕES PARA GERAR cb_* DO ERA5
+# 3) FUNCTIONS FOR GENERATING cb_* FROM ERA5
 # =========================================================
 
 extract_last_cb_row <- function(x, cb_template) {
 
-  # garantir vetor numérico
+  # ensure numeric vector
   x <- as.numeric(x)
 
-  # remover NA
+  # remove NA
   x <- x[is.finite(x)]
 
-  # checar comprimento mínimo
+  # check minimum length
   if (length(x) < (LAG_MAX + 1)) {
     return(rep(NA_real_, ncol(cb_template)))
   }
@@ -4661,7 +4323,7 @@ build_design_for_var <- function(wx_long, var, cb_template) {
 }
 
 # =========================================================
-# 4) GERAR cb_* PARA O ERA5
+# 4) Generate cb_* for ERA5
 # =========================================================
 
 X_era5_list <- map(
@@ -4684,7 +4346,7 @@ X_era5 <- X_era5 %>%
   filter(if_all(starts_with("cb_"), is.finite))
 
 # =========================================================
-# 5) PROJETAR NO MODELO DLNM
+# 5) DESIGN IN THE DLNM MODEL
 # =========================================================
 
 fml_rhs <- delete.response(terms(fit_sel))
@@ -4696,7 +4358,7 @@ X_era5 <- X_era5 %>%
   mutate(mu = plogis(eta))
 
 # =========================================================
-# 6) EFEITO RELATIVO (PIXEL × ANO)
+# 6) RELATIVE EFFECT (PIXEL × YEAR)
 # =========================================================
 
 effects_era5 <- X_era5 %>%
@@ -4712,16 +4374,16 @@ effects_era5 <- effects_era5 %>%
   )
 
 # =========================================================
-# 7) GRÁFICOS
+# 7) FIGURES
 # =========================================================
 
-# Distribuição do risco
+# Risk distribution
 ggplot(effects_era5, aes(RR)) +
   geom_histogram(bins = 40, fill = "steelblue", color = "black") +
   theme_bw() +
   labs(x = "Relative Risk", y = "Frequency")
 
-# Série temporal média
+# Average time series
 effects_era5 %>%
   group_by(year) %>%
   summarise(RR_mean = mean(RR)) %>%
@@ -4748,49 +4410,35 @@ ggplot(
 ```
 
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) Pacotes
-# =========================================================
+
 library(dplyr)
 library(sf)
 library(geobr)
 library(ggplot2)
 library(lme4)
-# =========================================================
-# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
-#    >>> Edite esta linha <<<
-# =========================================================
+
 states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
-# Exemplo acima — troque pelas suas UFs
-
-# --- ALTERNATIVA (se preferir remover em vez de manter):
-# states_remove <- c("PA","TO","MA","PI","CE","BA")
-# (aí, mais abaixo, use !%in% em vez de %in%)
 
 # =========================================================
-# 2) Ler estados (geobr) e garantir CRS
+# 2) Read states (geobr) and guarantee CRS
 # =========================================================
 br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
   st_transform(4326)
 
-# Filtrar SOMENTE os estados desejados
+# Filter ONLY the desired states
 br_states_use <- br_states %>%
   filter(abbrev_state %in% states_keep)
 
-# --- ALTERNATIVA (se estiver usando states_remove):
-# br_states_use <- br_states %>%
-#   filter(!abbrev_state %in% states_remove)
-
-# Polígono máscara (dissolve)
+# Polygon mask (dissolve)
 mask_states <- st_union(br_states_use)
 
 # =========================================================
-# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
-#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
+# 3) Prepare the grid for the average raster (remove NA mandatorily).
+#    tmax_mean_grid must have: longitude, latitude, tmax_mean
 # =========================================================
 tmax_mean_grid_clean <- effects_era5
 
-# Converter pixels (lon/lat) para sf
+# Convert pixels (lon/lat) to sf
 grid_sf <- st_as_sf(
   tmax_mean_grid_clean,
   coords = c("longitude", "latitude"),
@@ -4799,14 +4447,14 @@ grid_sf <- st_as_sf(
 )
 
 # =========================================================
-# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
+# 4) FINAL CLIP: keep only pixels within the chosen states
 # =========================================================
 grid_sf_clip <- st_filter(grid_sf, mask_states)
 
 tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
 
 # =========================================================
-# 5) Plot final (somente estados escolhidos)
+# 5) Final plot (selected states only)
 # =========================================================
 
 library(dplyr)
@@ -4925,46 +4573,25 @@ p_RR_ea
 ```
 
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) Pacotes
-# =========================================================
+
 library(dplyr)
 library(sf)
 library(geobr)
 library(ggplot2)
 
-# =========================================================
-# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
-#    >>> Edite esta linha <<<
-# =========================================================
+
 states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
-# Exemplo acima — troque pelas suas UFs
 
-# --- ALTERNATIVA (se preferir remover em vez de manter):
-# states_remove <- c("PA","TO","MA","PI","CE","BA")
-# (aí, mais abaixo, use !%in% em vez de %in%)
-
-# =========================================================
-# 2) Ler estados (geobr) e garantir CRS
-# =========================================================
 br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
   st_transform(4326)
 
-# Filtrar SOMENTE os estados desejados
+
 br_states_use <- br_states %>%
   filter(abbrev_state %in% states_keep)
 
-# --- ALTERNATIVA (se estiver usando states_remove):
-# br_states_use <- br_states %>%
-#   filter(!abbrev_state %in% states_remove)
 
-# Polígono máscara (dissolve)
 mask_states <- st_union(br_states_use)
 
-# =========================================================
-# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
-#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
-# =========================================================
 
 p_state_all = p_state_overall %>% 
   group_by(pixel_id,longitude,latitude) %>% 
@@ -4997,9 +4624,7 @@ p_state_overall_clean <- p_state_all %>%
 p_state_overall_early = p_state_overall_clean
 p_state_overall_early$period = "Early"
 
-# =========================================================
-# 5) Plot final (somente estados escolhidos)
-# =========================================================
+
 p_tmax <- p_state_overall_clean %>% 
   #filter(!year == 2012) %>% 
   ggplot(aes(x = longitude, y = latitude, fill = tmax)
@@ -5155,7 +4780,6 @@ p_states <- crossing(points, year = years)
 
 p_states <- p_states %>%
   mutate(
-    # Criando a data permitida diretamente com base no estado
     allowed_date = case_when(
       state == "MT" ~ as.Date(paste0(format(year), "-10-06")), 
       state == "MS" ~ as.Date(paste0(format(year), "-10-06")),
@@ -5209,28 +4833,22 @@ max(p_states$PD85)
 
 ### TMAX
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -5238,18 +4856,16 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF UMA VEZ
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
@@ -5259,30 +4875,28 @@ if (all(is.na(dates_all))) {
 
 layer_names <- names(r)
 
-# CRS do raster
+
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("Necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -5290,12 +4904,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  
   out_file <- file.path(out_dir, paste0("tmax_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -5307,19 +4921,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -5329,10 +4943,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo sem usar pivot_longer
+    
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -5341,26 +4955,26 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
 
-    # dpp
+    
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # Kelvin -> Celsius se necessário
+    
     if (nrow(long_dt) > 0) {
       media_tmax <- mean(long_dt$tmax, na.rm = TRUE)
       if (!is.na(media_tmax) && media_tmax > 100) {
@@ -5368,12 +4982,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       }
     }
 
-    # selecionar colunas finais
+    
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, tmax, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    
     fwrite(
       long_dt,
       file = out_file,
@@ -5381,18 +4995,16 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+    
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
 
-  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  cat("Ano", yr, "Finished. File saved in:\n", out_file, "\n")
   return(out_file)
 }
 
-# =========================================================
-# 5) RODAR ANO A ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -5411,14 +5023,12 @@ for (yr in years_to_run) {
     chunk_size = chunk_size
   )
 
-  # limpar
+  
   rm(pts_year)
   gc(verbose = FALSE)
 }
 
-# =========================================================
-# 6) JUNTAR TODOS OS ANOS
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -5439,9 +5049,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -5455,28 +5065,22 @@ dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/
 
 ### RAIN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -5484,51 +5088,47 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF UMA VEZ
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 
-# CRS do raster
+
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("Necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -5536,12 +5136,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  
   out_file <- file.path(out_dir, paste0("prcp_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -5553,19 +5153,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -5575,10 +5175,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo
+    
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -5587,46 +5187,41 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
 
-    # dpp
+    
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # AJUSTE DE UNIDADE DA CHUVA, SE NECESSÁRIO
-    # =====================================================
-    # ERA5-Land daily precipitation pode vir em metros (m)
-    # Se os valores estiverem muito pequenos, converte para mm
+    
     if (nrow(long_dt) > 0) {
       media_prcp <- mean(long_dt$prcp, na.rm = TRUE)
 
-      # regra prática:
-      # se a média for menor que 1, é bem provável que esteja em metros
+      
       if (!is.na(media_prcp) && media_prcp < 1) {
         long_dt[, prcp := prcp]
       }
     }
 
-    # selecionar colunas finais
+    
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, prcp, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    
     fwrite(
       long_dt,
       file = out_file,
@@ -5634,18 +5229,16 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+    
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
 
-  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  cat("Ano", yr, "Finished. File saved in:\n", out_file, "\n")
   return(out_file)
 }
 
-# =========================================================
-# 5) RODAR ANO A ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -5668,9 +5261,7 @@ for (yr in years_to_run) {
   gc(verbose = FALSE)
 }
 
-# =========================================================
-# 6) JUNTAR TODOS OS ANOS
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -5691,9 +5282,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -5708,28 +5299,22 @@ dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/
 
 ### TMEAN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -5744,27 +5329,23 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -5827,9 +5408,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # Kelvin -> Celsius (IMPORTANTE)
-    # =====================================================
+    
     if (nrow(long_dt) > 0) {
       media_tmean <- mean(long_dt$tmean, na.rm = TRUE)
 
@@ -5855,9 +5434,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   return(out_file)
 }
 
-# =========================================================
-# 5) LOOP POR ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -5876,9 +5453,7 @@ for (yr in years_to_run) {
   gc()
 }
 
-# =========================================================
-# 6) JUNTAR TUDO
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -5902,7 +5477,7 @@ if (length(valid_files) > 0) {
     gc()
   }
 
-  cat("Arquivo final salvo em:", final_file, "\n")
+  cat("Final file saved in:", final_file, "\n")
 }
 ```
 
@@ -5915,28 +5490,22 @@ dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearl
 ```
 ### RH
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -5951,27 +5520,23 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -6034,10 +5599,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # CHECAGEM OPCIONAL DE UNIDADE
-    # =====================================================
-    # Se RH estiver em fração (0-1), converte para %
+    
     if (nrow(long_dt) > 0) {
       media_rh <- mean(long_dt$rh, na.rm = TRUE)
 
@@ -6063,9 +5625,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   return(out_file)
 }
 
-# =========================================================
-# 5) LOOP POR ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -6084,9 +5644,7 @@ for (yr in years_to_run) {
   gc()
 }
 
-# =========================================================
-# 6) JUNTAR TUDO
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -6110,7 +5668,7 @@ if (length(valid_files) > 0) {
     gc()
   }
 
-  cat("Arquivo final salvo em:", final_file, "\n")
+  cat("Final file saved in:", final_file, "\n")
 }
 ```
 
@@ -6289,20 +5847,20 @@ max(p_state_overall$date)
 
 ### All variables
 ```{r, echo=TRUE, eval=FALSE}
-# --- Dados observados ---
-wx_use      # dados longos observados
-dat         # banco final do modelo (com cb_*)
-fit_sel     # modelo glmmTMB ajustado
 
-# --- Dados ERA5 ---
-p_state_overall   # ERA5 limpo, alinhado, com dpp = 0:85 completos
+wx_use      
+dat         
+fit_sel    
 
-# --- Parâmetros do modelo ---
+
+p_state_overall   
+
+
 VARS       <- c("tmax", "rain_cum", "vpd")
 LAG_MAX    <- 85
-DF_VAR     <- 4      # ou o valor que você usou
+DF_VAR     <- 4     
 DF_LAG     <- 4
-SEPARATOR  <- 10     # exatamente o mesmo do ajuste
+SEPARATOR  <- 10     
 
 
 
@@ -6312,9 +5870,7 @@ library(purrr)
 library(dlnm)
 library(ggplot2)
 
-# =========================================================
-# 1) CRIAR cb_templates (A PARTIR DO OBSERVADO)
-# =========================================================
+
 
 build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
 
@@ -6348,9 +5904,6 @@ for (v in VARS) {
   )
 }
 
-# =========================================================
-# 2) PREPARAR ERA5 COMO "EPIDEMIAS"
-# =========================================================
 
 era5_long <- p_state_overall %>%
   mutate(
@@ -6364,19 +5917,17 @@ era5_long <- era5_long %>%
   tidyr::fill(tmax, rain, tmean, rh, .direction = "down") %>%
   ungroup()
 
-# =========================================================
-# 3) FUNÇÕES PARA GERAR cb_* DO ERA5
-# =========================================================
+
 
 extract_last_cb_row <- function(x, cb_template) {
 
-  # garantir vetor numérico
+  
   x <- as.numeric(x)
 
-  # remover NA
+  
   x <- x[is.finite(x)]
 
-  # checar comprimento mínimo
+  
   if (length(x) < (LAG_MAX + 1)) {
     return(rep(NA_real_, ncol(cb_template)))
   }
@@ -6408,9 +5959,6 @@ build_design_for_var <- function(wx_long, var, cb_template) {
     unnest_wider(cb)
 }
 
-# =========================================================
-# 4) GERAR cb_* PARA O ERA5
-# =========================================================
 
 X_era5_list <- map(
   VARS,
@@ -6431,9 +5979,7 @@ X_era5 <- left_join(meta, X_era5, by = "epi_id")
 X_era5 <- X_era5 %>%
   filter(if_all(starts_with("cb_"), is.finite))
 
-# =========================================================
-# 5) PROJETAR NO MODELO DLNM
-# =========================================================
+
 
 fml_rhs <- delete.response(terms(fit_sel))
 Xmat    <- model.matrix(fml_rhs, data = X_era5)
@@ -6443,9 +5989,7 @@ eta     <- drop(Xmat %*% beta)
 X_era5 <- X_era5 %>%
   mutate(mu = plogis(eta))
 
-# =========================================================
-# 6) EFEITO RELATIVO (PIXEL × ANO)
-# =========================================================
+
 
 effects_era5 <- X_era5 %>%
   group_by(pixel_id, longitude, latitude, year) %>%
@@ -6459,17 +6003,15 @@ effects_era5 <- effects_era5 %>%
     PERC_mean = (RR - 1) * 100
   )
 
-# =========================================================
-# 7) GRÁFICOS
-# =========================================================
 
-# Distribuição do risco
+
+
 ggplot(effects_era5, aes(RR)) +
   geom_histogram(bins = 40, fill = "steelblue", color = "black") +
   theme_bw() +
   labs(x = "Relative Risk", y = "Frequency")
 
-# Série temporal média
+
 effects_era5 %>%
   group_by(year) %>%
   summarise(RR_mean = mean(RR)) %>%
@@ -6496,49 +6038,29 @@ ggplot(
 ```
 
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) Pacotes
-# =========================================================
+
 library(dplyr)
 library(sf)
 library(geobr)
 library(ggplot2)
 library(lme4)
-# =========================================================
-# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
-#    >>> Edite esta linha <<<
-# =========================================================
+
 states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
-# Exemplo acima — troque pelas suas UFs
 
-# --- ALTERNATIVA (se preferir remover em vez de manter):
-# states_remove <- c("PA","TO","MA","PI","CE","BA")
-# (aí, mais abaixo, use !%in% em vez de %in%)
-
-# =========================================================
-# 2) Ler estados (geobr) e garantir CRS
-# =========================================================
 br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
   st_transform(4326)
 
-# Filtrar SOMENTE os estados desejados
+
 br_states_use <- br_states %>%
   filter(abbrev_state %in% states_keep)
 
-# --- ALTERNATIVA (se estiver usando states_remove):
-# br_states_use <- br_states %>%
-#   filter(!abbrev_state %in% states_remove)
 
-# Polígono máscara (dissolve)
 mask_states <- st_union(br_states_use)
 
-# =========================================================
-# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
-#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
-# =========================================================
+
 tmax_mean_grid_clean <- effects_era5
 
-# Converter pixels (lon/lat) para sf
+
 grid_sf <- st_as_sf(
   tmax_mean_grid_clean,
   coords = c("longitude", "latitude"),
@@ -6546,9 +6068,7 @@ grid_sf <- st_as_sf(
   remove = FALSE
 )
 
-# =========================================================
-# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
-# =========================================================
+
 grid_sf_clip <- st_filter(grid_sf, mask_states)
 
 tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
@@ -6558,9 +6078,7 @@ tmax_mean_grid_clip <- tmax_mean_grid_clip %>%
     agri_year = paste0(year, "/", year + 1)
   )
 
-# =========================================================
-# 5) Plot final (somente estados escolhidos)
-# =========================================================
+
 p_RR <- tmax_mean_grid_clip %>% 
   #filter(!year == 2012) %>% 
   ggplot(aes(x = longitude, y = latitude, fill = PERC_mean)
@@ -6674,46 +6192,26 @@ p_RR_int
 
 
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) Pacotes
-# =========================================================
+
 library(dplyr)
 library(sf)
 library(geobr)
 library(ggplot2)
 
-# =========================================================
-# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
-#    >>> Edite esta linha <<<
-# =========================================================
+
 states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
-# Exemplo acima — troque pelas suas UFs
 
-# --- ALTERNATIVA (se preferir remover em vez de manter):
-# states_remove <- c("PA","TO","MA","PI","CE","BA")
-# (aí, mais abaixo, use !%in% em vez de %in%)
-
-# =========================================================
-# 2) Ler estados (geobr) e garantir CRS
-# =========================================================
 br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
   st_transform(4326)
 
-# Filtrar SOMENTE os estados desejados
+
 br_states_use <- br_states %>%
   filter(abbrev_state %in% states_keep)
 
-# --- ALTERNATIVA (se estiver usando states_remove):
-# br_states_use <- br_states %>%
-#   filter(!abbrev_state %in% states_remove)
 
-# Polígono máscara (dissolve)
 mask_states <- st_union(br_states_use)
 
-# =========================================================
-# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
-#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
-# =========================================================
+
 
 p_state_all = p_state_overall %>% 
   group_by(pixel_id,longitude,latitude) %>% 
@@ -6746,9 +6244,7 @@ p_state_overall_clean <- p_state_all %>%
 p_state_overall_intermediate = p_state_overall_clean
 p_state_overall_intermediate$period = "Intermediate"
 
-# =========================================================
-# 5) Plot final (somente estados escolhidos)
-# =========================================================
+
 p_tmax <- p_state_overall_intermediate %>% 
   #filter(!year == 2012) %>% 
   ggplot(aes(x = longitude, y = latitude, fill = tmax)
@@ -6905,7 +6401,6 @@ p_states <- crossing(points, year = years)
 
 p_states <- p_states %>%
   mutate(
-    # Criando a data permitida diretamente com base no estado
     allowed_date = case_when(
       state == "MT" ~ as.Date(paste0(format(year), "-10-26")), 
       state == "MS" ~ as.Date(paste0(format(year), "-10-26")),
@@ -6960,28 +6455,20 @@ max(dt_rain$PD85)
 
 ### TMAX
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmax_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -6989,18 +6476,16 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF UMA VEZ
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
@@ -7010,30 +6495,28 @@ if (all(is.na(dates_all))) {
 
 layer_names <- names(r)
 
-# CRS do raster
+
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("Necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -7041,12 +6524,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  
   out_file <- file.path(out_dir, paste0("tmax_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -7058,19 +6541,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -7080,10 +6563,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo sem usar pivot_longer
+    
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -7092,26 +6575,26 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
 
-    # dpp
+    
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # Kelvin -> Celsius se necessário
+    
     if (nrow(long_dt) > 0) {
       media_tmax <- mean(long_dt$tmax, na.rm = TRUE)
       if (!is.na(media_tmax) && media_tmax > 100) {
@@ -7119,12 +6602,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       }
     }
 
-    # selecionar colunas finais
+    
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, tmax, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    
     fwrite(
       long_dt,
       file = out_file,
@@ -7132,18 +6615,16 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+    
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
 
-  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  cat("Ano", yr, "Finished. File saved in:\n", out_file, "\n")
   return(out_file)
 }
 
-# =========================================================
-# 5) RODAR ANO A ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -7162,14 +6643,12 @@ for (yr in years_to_run) {
     chunk_size = chunk_size
   )
 
-  # limpar
+  
   rm(pts_year)
   gc(verbose = FALSE)
 }
 
-# =========================================================
-# 6) JUNTAR TODOS OS ANOS
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -7190,9 +6669,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -7207,28 +6686,21 @@ dt_tmax <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmax_yearly/
 
 ### RAIN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_prcp_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -7236,51 +6708,47 @@ p_states_dt[, PD85         := as.Date(PD85)]
 p_states_dt[, pt_id        := .I]
 p_states_dt[, year_allowed := year(allowed_date)]
 
-# manter apenas linhas válidas
+
 p_states_dt <- p_states_dt[
   !is.na(longitude) & !is.na(latitude) &
   !is.na(allowed_date) & !is.na(PD85)
 ]
 
-# opcional: garantir janela máxima de 85 dias
+
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF UMA VEZ
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 
-# CRS do raster
+
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO PARA PROCESSAR UM ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
-  cat("N pontos:", nrow(pts_year), "\n")
+  cat("Processing year:", yr, "\n")
+  cat("N points:", nrow(pts_year), "\n")
 
-  # intervalo mínimo necessário para este ano
+  
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
 
-  cat("Intervalo necessário:", as.character(date_ini), "até", as.character(date_fim), "\n")
+  cat("Necessary interval:", as.character(date_ini), "until", as.character(date_fim), "\n")
 
-  # layers do raster estritamente necessários
+  
   idx <- which(dates_all >= date_ini & dates_all <= date_fim)
 
   if (length(idx) == 0) {
-    cat("Nenhuma camada encontrada para este intervalo. Pulando.\n")
+    cat("No layers found for this range. Skipping.\n")
     return(NULL)
   }
 
@@ -7288,12 +6756,12 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   dates_sub <- dates_all[idx]
   layer_names_sub <- layer_names[idx]
 
-  cat("N camadas usadas:", length(idx), "\n")
+  cat("N used layers:", length(idx), "\n")
 
-  # saída do ano
+  
   out_file <- file.path(out_dir, paste0("prcp_window_", yr, ".csv.gz"))
 
-  # remover se já existir
+  
   if (file.exists(out_file)) file.remove(out_file)
 
   n <- nrow(pts_year)
@@ -7305,19 +6773,19 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     pts_chunk <- pts_year[s:e]
 
-    # criar vetor espacial
+    
     pts_v <- vect(
       pts_chunk,
       geom = c("longitude", "latitude"),
       crs  = "EPSG:4326"
     )
 
-    # reprojetar se necessário
+    
     if (!is.na(r_crs) && r_crs != crs(pts_v)) {
       pts_v <- project(pts_v, r_crs)
     }
 
-    # extração
+    
     ext <- terra::extract(
       r_sub,
       pts_v,
@@ -7327,10 +6795,10 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
 
     ext_dt <- as.data.table(ext)
 
-    # adicionar pt_id na mesma ordem do chunk
+    
     ext_dt[, pt_id := pts_chunk$pt_id]
 
-    # formato longo
+    
     long_dt <- melt(
       ext_dt,
       id.vars = c("x", "y", "pt_id"),
@@ -7339,46 +6807,41 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       variable.factor = FALSE
     )
 
-    # mapear datas
+    
     long_dt[, date := dates_sub[match(layer, layer_names_sub)]]
 
-    # renomear coordenadas extraídas
+    
     setnames(long_dt, c("x", "y"), c("longitude", "latitude"))
 
-    # juntar datas de interesse do ponto
+    
     meta_dt <- pts_chunk[, .(pt_id, allowed_date, PD85)]
     long_dt <- merge(long_dt, meta_dt, by = "pt_id", all.x = TRUE)
 
-    # filtrar janela real do ponto
+    
     long_dt <- long_dt[
       date >= allowed_date & date <= PD85
     ]
 
-    # dpp
+    
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # AJUSTE DE UNIDADE DA CHUVA, SE NECESSÁRIO
-    # =====================================================
-    # ERA5-Land daily precipitation pode vir em metros (m)
-    # Se os valores estiverem muito pequenos, converte para mm
+    
     if (nrow(long_dt) > 0) {
       media_prcp <- mean(long_dt$prcp, na.rm = TRUE)
 
-      # regra prática:
-      # se a média for menor que 1, é bem provável que esteja em metros
+      
       if (!is.na(media_prcp) && media_prcp < 1) {
         long_dt[, prcp := prcp]
       }
     }
 
-    # selecionar colunas finais
+    
     long_dt <- long_dt[, .(
       pt_id, longitude, latitude, date, dpp, prcp, allowed_date, PD85
     )]
 
-    # gravar incrementalmente
+    
     fwrite(
       long_dt,
       file = out_file,
@@ -7386,18 +6849,16 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
       sep = ","
     )
 
-    # limpar memória
+   
     rm(pts_chunk, pts_v, ext, ext_dt, long_dt, meta_dt)
     gc(verbose = FALSE)
   }
 
-  cat("Ano", yr, "finalizado. Arquivo salvo em:\n", out_file, "\n")
+  cat("Ano", yr, "Finished. File saved in:\n", out_file, "\n")
   return(out_file)
 }
 
-# =========================================================
-# 5) RODAR ANO A ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -7420,9 +6881,7 @@ for (yr in years_to_run) {
   gc(verbose = FALSE)
 }
 
-# =========================================================
-# 6) JUNTAR TODOS OS ANOS
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -7443,9 +6902,9 @@ if (length(valid_files) > 0) {
     gc(verbose = FALSE)
   }
 
-  cat("\nArquivo final salvo em:\n", final_file, "\n")
+  cat("\nFinal file saved in:\n", final_file, "\n")
 } else {
-  cat("\nNenhum arquivo anual foi criado.\n")
+  cat("\nNo annual file was created.\n")
 }
 ```
 
@@ -7460,28 +6919,21 @@ dt_rain <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_prcp_yearly/
 
 ### TMEAN
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_tmean_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -7496,27 +6948,23 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
 if (all(is.na(dates_all))) {
-  stop("Datas não encontradas no NetCDF.")
+  stop("Dates not found in NetCDF.")
 }
 
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -7579,9 +7027,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # Kelvin -> Celsius (IMPORTANTE)
-    # =====================================================
+   
     if (nrow(long_dt) > 0) {
       media_tmean <- mean(long_dt$tmean, na.rm = TRUE)
 
@@ -7607,9 +7053,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   return(out_file)
 }
 
-# =========================================================
-# 5) LOOP POR ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -7628,9 +7072,7 @@ for (yr in years_to_run) {
   gc()
 }
 
-# =========================================================
-# 6) JUNTAR TUDO
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -7654,7 +7096,7 @@ if (length(valid_files) > 0) {
     gc()
   }
 
-  cat("Arquivo final salvo em:", final_file, "\n")
+  cat("Final file saved in:", final_file, "\n")
 }
 ```
 
@@ -7667,28 +7109,22 @@ dt_tmean <- fread("/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_tmean_yearl
 ```
 ### RH
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) PACOTES
-# =========================================================
+
 library(terra)
 library(data.table)
 library(lubridate)
 
-# =========================================================
-# 1) ENTRADAS
-# =========================================================
+
 #nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2012_2025.nc"
 nc_path <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/data/era5land_daily_rh_2005_2025.nc"
 out_dir <- "/media/amazonia/hd2/lais/Ricardo/DLNM/data/output_rh_yearly"
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-# ajuste conforme sua RAM
+
 chunk_size <- 5000
 
-# =========================================================
-# 2) PREPARAR p_states
-# =========================================================
+
 p_states_dt <- as.data.table(p_states)
 
 p_states_dt[, allowed_date := as.Date(allowed_date)]
@@ -7703,9 +7139,7 @@ p_states_dt <- p_states_dt[
 
 p_states_dt[PD85 > allowed_date + 85, PD85 := allowed_date + 85]
 
-# =========================================================
-# 3) LER O NetCDF
-# =========================================================
+
 r <- rast(nc_path)
 
 dates_all <- as.Date(time(r))
@@ -7716,14 +7150,12 @@ if (all(is.na(dates_all))) {
 layer_names <- names(r)
 r_crs <- crs(r)
 
-# =========================================================
-# 4) FUNÇÃO POR ANO
-# =========================================================
+
 process_year <- function(yr, pts_year, r, dates_all, layer_names,
                          out_dir, chunk_size = 5000) {
 
   cat("\n=============================\n")
-  cat("Processando ano:", yr, "\n")
+  cat("Processing year:", yr, "\n")
 
   date_ini <- min(pts_year$allowed_date, na.rm = TRUE)
   date_fim <- max(pts_year$PD85, na.rm = TRUE)
@@ -7786,10 +7218,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
     long_dt[, dpp := as.integer(date - allowed_date)]
     long_dt <- long_dt[dpp >= 0 & dpp <= 85]
 
-    # =====================================================
-    # CHECAGEM OPCIONAL DE UNIDADE
-    # =====================================================
-    # Se RH estiver em fração (0-1), converte para %
+    
     if (nrow(long_dt) > 0) {
       media_rh <- mean(long_dt$rh, na.rm = TRUE)
 
@@ -7815,9 +7244,7 @@ process_year <- function(yr, pts_year, r, dates_all, layer_names,
   return(out_file)
 }
 
-# =========================================================
-# 5) LOOP POR ANO
-# =========================================================
+
 years_to_run <- sort(unique(p_states_dt$year_allowed))
 
 files_created <- vector("list", length(years_to_run))
@@ -7836,9 +7263,7 @@ for (yr in years_to_run) {
   gc()
 }
 
-# =========================================================
-# 6) JUNTAR TUDO
-# =========================================================
+
 valid_files <- unlist(files_created)
 valid_files <- valid_files[file.exists(valid_files)]
 
@@ -7862,7 +7287,7 @@ if (length(valid_files) > 0) {
     gc()
   }
 
-  cat("Arquivo final salvo em:", final_file, "\n")
+  cat("Final file saved in:", final_file, "\n")
 }
 ```
 
@@ -8042,20 +7467,20 @@ max(p_state_overall$date)
 
 ### All variables
 ```{r, echo=TRUE, eval=FALSE}
-# --- Dados observados ---
-wx_use      # dados longos observados
-dat         # banco final do modelo (com cb_*)
-fit_sel     # modelo glmmTMB ajustado
 
-# --- Dados ERA5 ---
-p_state_overall   # ERA5 limpo, alinhado, com dpp = 0:85 completos
+wx_use     
+dat         
+fit_sel     
 
-# --- Parâmetros do modelo ---
+
+p_state_overall   
+
+
 VARS       <- c("tmax", "rain_cum", "vpd")
 LAG_MAX    <- 85
-DF_VAR     <- 4      # ou o valor que você usou
+DF_VAR     <- 4      
 DF_LAG     <- 4
-SEPARATOR  <- 10     # exatamente o mesmo do ajuste
+SEPARATOR  <- 10    
 
 
 
@@ -8065,9 +7490,7 @@ library(purrr)
 library(dlnm)
 library(ggplot2)
 
-# =========================================================
-# 1) CRIAR cb_templates (A PARTIR DO OBSERVADO)
-# =========================================================
+
 
 build_pooled_series <- function(wx_long, var, sep_n = SEPARATOR) {
 
@@ -8101,9 +7524,7 @@ for (v in VARS) {
   )
 }
 
-# =========================================================
-# 2) PREPARAR ERA5 COMO "EPIDEMIAS"
-# =========================================================
+
 
 era5_long <- p_state_overall %>%
   mutate(
@@ -8117,19 +7538,17 @@ era5_long <- era5_long %>%
   tidyr::fill(tmax, rain, tmean, rh, .direction = "down") %>%
   ungroup()
 
-# =========================================================
-# 3) FUNÇÕES PARA GERAR cb_* DO ERA5
-# =========================================================
+
 
 extract_last_cb_row <- function(x, cb_template) {
 
-  # garantir vetor numérico
+  
   x <- as.numeric(x)
 
-  # remover NA
+  
   x <- x[is.finite(x)]
 
-  # checar comprimento mínimo
+  
   if (length(x) < (LAG_MAX + 1)) {
     return(rep(NA_real_, ncol(cb_template)))
   }
@@ -8161,9 +7580,7 @@ build_design_for_var <- function(wx_long, var, cb_template) {
     unnest_wider(cb)
 }
 
-# =========================================================
-# 4) GERAR cb_* PARA O ERA5
-# =========================================================
+
 
 X_era5_list <- map(
   VARS,
@@ -8184,9 +7601,7 @@ X_era5 <- left_join(meta, X_era5, by = "epi_id")
 X_era5 <- X_era5 %>%
   filter(if_all(starts_with("cb_"), is.finite))
 
-# =========================================================
-# 5) PROJETAR NO MODELO DLNM
-# =========================================================
+
 
 fml_rhs <- delete.response(terms(fit_sel))
 Xmat    <- model.matrix(fml_rhs, data = X_era5)
@@ -8196,9 +7611,7 @@ eta     <- drop(Xmat %*% beta)
 X_era5 <- X_era5 %>%
   mutate(mu = plogis(eta))
 
-# =========================================================
-# 6) EFEITO RELATIVO (PIXEL × ANO)
-# =========================================================
+
 
 effects_era5 <- X_era5 %>%
   group_by(pixel_id, longitude, latitude, year) %>%
@@ -8212,11 +7625,7 @@ effects_era5 <- effects_era5 %>%
     PERC_mean = (RR - 1) * 100
   )
 
-# =========================================================
-# 7) GRÁFICOS
-# =========================================================
 
-# Distribuição do risco
 ggplot(effects_era5, aes(RR)) +
   geom_histogram(bins = 40, fill = "steelblue", color = "black") +
   theme_bw() +
@@ -8249,49 +7658,29 @@ ggplot(
 ```
 
 ```{r, echo=TRUE, eval=FALSE}
-# =========================================================
-# 0) Pacotes
-# =========================================================
+
 library(dplyr)
 library(sf)
 library(geobr)
 library(ggplot2)
 library(lme4)
-# =========================================================
-# 1) DEFINA OS ESTADOS QUE VOCÊ QUER NO MAPA (SIGLAS)
-#    >>> Edite esta linha <<<
-# =========================================================
+
 states_keep <- c("MT","MS","GO","PR","TO","DF","BA","MG","SP")  
-# Exemplo acima — troque pelas suas UFs
 
-# --- ALTERNATIVA (se preferir remover em vez de manter):
-# states_remove <- c("PA","TO","MA","PI","CE","BA")
-# (aí, mais abaixo, use !%in% em vez de %in%)
-
-# =========================================================
-# 2) Ler estados (geobr) e garantir CRS
-# =========================================================
 br_states <- geobr::read_state(year = 2020, showProgress = FALSE) %>%
   st_transform(4326)
 
-# Filtrar SOMENTE os estados desejados
+
 br_states_use <- br_states %>%
   filter(abbrev_state %in% states_keep)
 
-# --- ALTERNATIVA (se estiver usando states_remove):
-# br_states_use <- br_states %>%
-#   filter(!abbrev_state %in% states_remove)
 
-# Polígono máscara (dissolve)
 mask_states <- st_union(br_states_use)
 
-# =========================================================
-# 3) Preparar o grid do raster médio (remover NA obrigatoriamente)
-#    tmax_mean_grid deve ter: longitude, latitude, tmax_mean
-# =========================================================
+
 tmax_mean_grid_clean <- effects_era5
 
-# Converter pixels (lon/lat) para sf
+
 grid_sf <- st_as_sf(
   tmax_mean_grid_clean,
   coords = c("longitude", "latitude"),
@@ -8299,9 +7688,7 @@ grid_sf <- st_as_sf(
   remove = FALSE
 )
 
-# =========================================================
-# 4) CLIP FINAL: manter apenas pixels dentro dos estados escolhidos
-# =========================================================
+
 grid_sf_clip <- st_filter(grid_sf, mask_states)
 
 tmax_mean_grid_clip <- st_drop_geometry(grid_sf_clip)
@@ -8311,9 +7698,7 @@ tmax_mean_grid_clip <- tmax_mean_grid_clip %>%
     agri_year = paste0(year, "/", year + 1)
   )
 
-# =========================================================
-# 5) Plot final (somente estados escolhidos)
-# =========================================================
+
 p_RR <- tmax_mean_grid_clip %>% 
   #filter(!year == 2012) %>% 
   ggplot(aes(x = longitude, y = latitude, fill = PERC_mean)
@@ -8561,9 +7946,7 @@ p_state_overall_clean <- p_state_all %>%
 p_state_overall_late = p_state_overall_clean
 p_state_overall_late$period = "Late"
 
-# =========================================================
-# 5) Plot final (somente estados escolhidos)
-# =========================================================
+
 p_tmax <- p_state_overall_late %>% 
   #filter(!year == 2012) %>% 
   ggplot(aes(x = longitude, y = latitude, fill = tmax)
@@ -8717,42 +8100,30 @@ library(ggpubr)
 library(sf)
 library(grid)
 
-# ---------------------------
-# Quebras do eixo x
-# ---------------------------
+
 x_breaks <- seq(
   floor(min(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
   ceiling(max(tmax_mean_grid_clip$longitude, na.rm = TRUE) / 10) * 10,
   by = 10
 )
 
-# ---------------------------
-# Tema comum
-# ---------------------------
+
 theme_map_common <- theme_bw() +
   theme(
     plot.title = element_text(hjust = 0.5),
     strip.background = element_blank(),
     strip.text = element_text(size = 12, face = "bold"),
     legend.position = "right",
-
-    # reduz espaço externo entre os plots
     plot.margin = margin(0.5, 2, 0.5, 2),
-
-    # compacta legenda
     legend.key.height = unit(0.40, "cm"),
     legend.key.width  = unit(0.35, "cm"),
     legend.title = element_text(size = 8, margin = margin(b = 4)),
     legend.text  = element_text(size = 7),
-
-    # remove folgas extras da legenda
     legend.margin = margin(0, 0, 0, 0),
     legend.box.margin = margin(0, 0, 0, 0)
   )
 
-# ---------------------------
-# Plot TMAX
-# ---------------------------
+
 p_tmax <- p_state_overall_all %>%
   ggplot(aes(x = longitude, y = latitude, fill = tmax)) +
   geom_raster(interpolate = FALSE) +
@@ -8783,7 +8154,6 @@ p_tmax <- p_state_overall_all %>%
   scale_x_continuous(breaks = x_breaks) +
   theme_map_common +
   theme(
-    # mantém espaço do eixo x, mas invisível
     axis.title.x = element_text(colour = "transparent"),
     axis.text.x  = element_text(colour = "transparent"),
     axis.ticks.x = element_line(colour = "transparent"),
@@ -8791,9 +8161,7 @@ p_tmax <- p_state_overall_all %>%
        legend.title = element_text(face = "bold")
   )
 
-# ---------------------------
-# Plot RAIN
-# ---------------------------
+
 p_rain <- p_state_overall_all %>%
   ggplot(aes(x = longitude, y = latitude, fill = rain)) +
   geom_raster(interpolate = FALSE) +
@@ -8824,10 +8192,7 @@ p_rain <- p_state_overall_all %>%
   scale_x_continuous(breaks = x_breaks) +
   theme_map_common +
   theme(
-    # mantém espaço do strip, mas invisível
     strip.text = element_text(size = 12, face = "bold", colour = "transparent"),
-
-    # mantém espaço do eixo x, mas invisível
     axis.title.x = element_text(colour = "transparent"),
     axis.text.x  = element_text(colour = "transparent"),
     axis.ticks.x = element_line(colour = "transparent"),
@@ -8835,9 +8200,6 @@ p_rain <- p_state_overall_all %>%
     legend.title = element_text(face = "bold")
   )
 
-# ---------------------------
-# Plot VPD
-# ---------------------------
 p_vpd <- p_state_overall_all %>%
   ggplot(aes(x = longitude, y = latitude, fill = vpd)) +
   geom_raster(interpolate = FALSE) +
@@ -8868,17 +8230,12 @@ p_vpd <- p_state_overall_all %>%
   scale_x_continuous(breaks = x_breaks) +
   theme_map_common +
   theme(
-    # mantém espaço do strip, mas invisível
     strip.text = element_text(size = 12, face = "bold", colour = "transparent"),
     axis.title = element_text(face = "bold"),
        legend.title = element_text(face = "bold")
   )
        
-# ---------------------------
-# Figura final
-# ---------------------------
 
-  
 fig_maps <- ggarrange(
   p_tmax, p_rain, p_vpd,
   ncol = 1, nrow = 3,
@@ -8890,10 +8247,8 @@ fig_maps <- ggarrange(
   label.y = 0.98
 )
 
-# visualizar
 fig_maps
 
-# salvar
 ggsave(
   filename = "fig/map_all_period.png",
   plot = fig_maps,
