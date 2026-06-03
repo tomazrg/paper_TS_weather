@@ -9,7 +9,7 @@ format:
 
 Our study aimed to characterize weather variables across the different epidemiological phases of target spot epidemics
 
-A preprint version of this work has been available at [here](.).
+A preprint version of this work has been available at [here](https://www.cabidigitallibrary.org/doi/10.31220/agriRxiv.2026.00449).
 
 ------------------------------------------------------------------------
 
