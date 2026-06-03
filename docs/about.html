@@ -201,9 +201,31 @@ window.Quarto = {
   <ul class="collapse">
   <li><a href="#inferential-framework-and-model-fitting" id="toc-inferential-framework-and-model-fitting" class="nav-link" data-scroll-target="#inferential-framework-and-model-fitting">Inferential framework and model fitting</a></li>
   <li><a href="#model-performance" id="toc-model-performance" class="nav-link" data-scroll-target="#model-performance">Model performance</a></li>
-  <li><a href="#estimation-of-cumulative-relative-risks-over-epidemiologically-defined-lag-periods" id="toc-estimation-of-cumulative-relative-risks-over-epidemiologically-defined-lag-periods" class="nav-link" data-scroll-target="#estimation-of-cumulative-relative-risks-over-epidemiologically-defined-lag-periods">Estimation of cumulative relative risks over epidemiologically defined lag periods</a></li>
-  <li><a href="#mobile-lag" id="toc-mobile-lag" class="nav-link" data-scroll-target="#mobile-lag">Mobile lag</a></li>
   </ul></li>
+  </ul></li>
+  <li><a href="#cumulative-effects" id="toc-cumulative-effects" class="nav-link" data-scroll-target="#cumulative-effects">Cumulative effects</a>
+  <ul class="collapse">
+  <li><a href="#temperature" id="toc-temperature" class="nav-link" data-scroll-target="#temperature">Temperature</a>
+  <ul class="collapse">
+  <li><a href="#later-period-0-40" id="toc-later-period-0-40" class="nav-link" data-scroll-target="#later-period-0-40">Later period (0-40)</a></li>
+  <li><a href="#ealier-period-41-85" id="toc-ealier-period-41-85" class="nav-link" data-scroll-target="#ealier-period-41-85">Ealier period (41-85)</a></li>
+  </ul></li>
+  <li><a href="#precipitation" id="toc-precipitation" class="nav-link" data-scroll-target="#precipitation">Precipitation</a>
+  <ul class="collapse">
+  <li><a href="#later-period-0-40-1" id="toc-later-period-0-40-1" class="nav-link" data-scroll-target="#later-period-0-40-1">Later period (0-40)</a></li>
+  <li><a href="#ealier-period-41-85-1" id="toc-ealier-period-41-85-1" class="nav-link" data-scroll-target="#ealier-period-41-85-1">Ealier period (41-85)</a></li>
+  </ul></li>
+  <li><a href="#vpd" id="toc-vpd" class="nav-link" data-scroll-target="#vpd">VPD</a>
+  <ul class="collapse">
+  <li><a href="#later-period-0-40-2" id="toc-later-period-0-40-2" class="nav-link" data-scroll-target="#later-period-0-40-2">Later period (0-40)</a></li>
+  <li><a href="#ealier-period-41-85-2" id="toc-ealier-period-41-85-2" class="nav-link" data-scroll-target="#ealier-period-41-85-2">Ealier period (41-85)</a></li>
+  </ul></li>
+  </ul></li>
+  <li><a href="#daily-effect" id="toc-daily-effect" class="nav-link" data-scroll-target="#daily-effect">Daily effect</a>
+  <ul class="collapse">
+  <li><a href="#temperature-1" id="toc-temperature-1" class="nav-link" data-scroll-target="#temperature-1">Temperature</a></li>
+  <li><a href="#precipitation-1" id="toc-precipitation-1" class="nav-link" data-scroll-target="#precipitation-1">Precipitation</a></li>
+  <li><a href="#vpd-1" id="toc-vpd-1" class="nav-link" data-scroll-target="#vpd-1">VPD</a></li>
   </ul></li>
   <li><a href="#discriptive-plotting" id="toc-discriptive-plotting" class="nav-link" data-scroll-target="#discriptive-plotting">Discriptive plotting</a></li>
   <li><a href="#map" id="toc-map" class="nav-link" data-scroll-target="#map">Map</a></li>
@@ -705,8 +727,8 @@ Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
 <div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">gc</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>          used  (Mb) gc trigger  (Mb) max used  (Mb)
-Ncells 3724557 199.0    5883060 314.2  5883060 314.2
-Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
+Ncells 3724556 199.0    5883050 314.2  5883050 314.2
+Vcells 9179823  70.1   26948985 205.7 26948985 205.7</code></pre>
 </div>
 </div>
 </section>
@@ -841,8 +863,10 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </section>
 </section>
-<section id="estimation-of-cumulative-relative-risks-over-epidemiologically-defined-lag-periods" class="level3">
-<h3 class="anchored" data-anchor-id="estimation-of-cumulative-relative-risks-over-epidemiologically-defined-lag-periods">Estimation of cumulative relative risks over epidemiologically defined lag periods</h3>
+</section>
+</section>
+<section id="cumulative-effects" class="level1">
+<h1>Cumulative effects</h1>
 <blockquote class="blockquote">
 <p>To summarize the distributed effects of climatic variables in an epidemiologically interpretable manner, relative risks were derived from the fitted DLNM by aggregating lag-specific contributions over predefined temporal periods. Rather than interpreting individual lag effects, which may be difficult to relate directly to biological processes, cumulative effects were computed for early and late lag periods corresponding to distinct phases of epidemic development.</p>
 </blockquote>
@@ -852,10 +876,10 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 <blockquote class="blockquote">
 <p>Lag periods were defined a priori to reflect biologically meaningful phases of the epidemic. The early period (0–40 days before assessment) captures processes related to infection establishment, latent development, and early lesion formation, whereas the late period (41–70 days) reflects symptom expansion and disease expression near the assessment stage. This aggregation facilitates direct comparison of climatic effects across variables and epidemic phases, while preserving the non-linear and delayed structure estimated by the DLNM.</p>
 </blockquote>
-<section id="temperature" class="level4">
-<h4 class="anchored" data-anchor-id="temperature">Temperature</h4>
-<section id="later-period-0-40" class="level5">
-<h5 class="anchored" data-anchor-id="later-period-0-40">Later period (0-40)</h5>
+<section id="temperature" class="level2">
+<h2 class="anchored" data-anchor-id="temperature">Temperature</h2>
+<section id="later-period-0-40" class="level3">
+<h3 class="anchored" data-anchor-id="later-period-0-40">Later period (0-40)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"tmax"</span></span>
 <span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -932,8 +956,8 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </div>
 </section>
-<section id="ealier-period-41-85" class="level5">
-<h5 class="anchored" data-anchor-id="ealier-period-41-85">Ealier period (41-85)</h5>
+<section id="ealier-period-41-85" class="level3">
+<h3 class="anchored" data-anchor-id="ealier-period-41-85">Ealier period (41-85)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"tmax"</span></span>
 <span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -1014,10 +1038,10 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </section>
 </section>
-<section id="precipitation" class="level4">
-<h4 class="anchored" data-anchor-id="precipitation">Precipitation</h4>
-<section id="later-period-0-40-1" class="level5">
-<h5 class="anchored" data-anchor-id="later-period-0-40-1">Later period (0-40)</h5>
+<section id="precipitation" class="level2">
+<h2 class="anchored" data-anchor-id="precipitation">Precipitation</h2>
+<section id="later-period-0-40-1" class="level3">
+<h3 class="anchored" data-anchor-id="later-period-0-40-1">Later period (0-40)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb28"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"rain_cum"</span></span>
 <span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -1094,8 +1118,8 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </div>
 </section>
-<section id="ealier-period-41-85-1" class="level5">
-<h5 class="anchored" data-anchor-id="ealier-period-41-85-1">Ealier period (41-85)</h5>
+<section id="ealier-period-41-85-1" class="level3">
+<h3 class="anchored" data-anchor-id="ealier-period-41-85-1">Ealier period (41-85)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb29"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"rain_cum"</span></span>
 <span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -1175,10 +1199,10 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </section>
 </section>
-<section id="vpd" class="level4">
-<h4 class="anchored" data-anchor-id="vpd">VPD</h4>
-<section id="later-period-0-40-2" class="level5">
-<h5 class="anchored" data-anchor-id="later-period-0-40-2">Later period (0-40)</h5>
+<section id="vpd" class="level2">
+<h2 class="anchored" data-anchor-id="vpd">VPD</h2>
+<section id="later-period-0-40-2" class="level3">
+<h3 class="anchored" data-anchor-id="later-period-0-40-2">Later period (0-40)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb30"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"vpd"</span></span>
 <span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -1261,8 +1285,8 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </div>
 </div>
 </section>
-<section id="ealier-period-41-85-2" class="level5">
-<h5 class="anchored" data-anchor-id="ealier-period-41-85-2">Ealier period (41-85)</h5>
+<section id="ealier-period-41-85-2" class="level3">
+<h3 class="anchored" data-anchor-id="ealier-period-41-85-2">Ealier period (41-85)</h3>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb31"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" aria-hidden="true" tabindex="-1"></a>var <span class="ot">&lt;-</span> <span class="st">"vpd"</span></span>
 <span id="cb31-2"><a href="#cb31-2" aria-hidden="true" tabindex="-1"></a>cb  <span class="ot">&lt;-</span> cb_templates[[var]]</span>
@@ -1371,10 +1395,10 @@ Vcells 9179898  70.1   26949060 205.7 26949060 205.7</code></pre>
 </section>
 </section>
 </section>
-<section id="mobile-lag" class="level3">
-<h3 class="anchored" data-anchor-id="mobile-lag">Mobile lag</h3>
-<section id="temperature-1" class="level4">
-<h4 class="anchored" data-anchor-id="temperature-1">Temperature</h4>
+<section id="daily-effect" class="level1">
+<h1>Daily effect</h1>
+<section id="temperature-1" class="level2">
+<h2 class="anchored" data-anchor-id="temperature-1">Temperature</h2>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb34"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb34-1"><a href="#cb34-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dlnm)</span>
 <span id="cb34-2"><a href="#cb34-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
@@ -2013,8 +2037,8 @@ Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
 </div>
 </section>
 </section>
-<section id="precipitation-1" class="level4">
-<h4 class="anchored" data-anchor-id="precipitation-1">Precipitation</h4>
+<section id="precipitation-1" class="level2">
+<h2 class="anchored" data-anchor-id="precipitation-1">Precipitation</h2>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb41"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb41-1"><a href="#cb41-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dlnm)</span>
 <span id="cb41-2"><a href="#cb41-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
@@ -2581,8 +2605,8 @@ Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
 </div>
 </section>
 </section>
-<section id="vpd-1" class="level4">
-<h4 class="anchored" data-anchor-id="vpd-1">VPD</h4>
+<section id="vpd-1" class="level2">
+<h2 class="anchored" data-anchor-id="vpd-1">VPD</h2>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb46"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dlnm)</span>
 <span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
@@ -3172,8 +3196,6 @@ Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1</code></pre>
 </div>
 <div class="sourceCode cell-code" id="cb54"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="co">#ggsave("fig/delta_severity.png", dpi = 600, width = 10, height = 8)</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
-</section>
-</section>
 </section>
 </section>
 </section>

@@ -467,9 +467,9 @@ ggsave("fig/model.png", dpi = 600, width = 8, height = 6)
 
 >Lag periods were defined a priori to reflect biologically meaningful phases of the epidemic. The early period (0–40 days before assessment) captures processes related to infection establishment, latent development, and early lesion formation, whereas the late period (41–70 days) reflects symptom expansion and disease expression near the assessment stage. This aggregation facilitates direct comparison of climatic effects across variables and epidemic phases, while preserving the non-linear and delayed structure estimated by the DLNM.
 
-#### Temperature
+## Temperature
 
-##### Later period (0-40)
+### Later period (0-40)
 
 ```{r}
 var <- "tmax"
@@ -540,7 +540,7 @@ ggplot(aes(x=tmean, y=PERC)) +
 tmean_RR_second
 ```
 
-##### Ealier period (41-85)
+### Ealier period (41-85)
 
 ```{r}
 var <- "tmax"
@@ -615,9 +615,9 @@ ggplot(aes(x=tmean, y=PERC)) +
 tmean_RR_first
 ```
 
-#### Precipitation
+## Precipitation
 
-##### Later period (0-40)
+### Later period (0-40)
 
 ```{r}
 var <- "rain_cum"
@@ -689,7 +689,7 @@ rain_RR_second
 
 ```
 
-##### Ealier period (41-85)
+### Ealier period (41-85)
 
 ```{r}
 var <- "rain_cum"
@@ -762,9 +762,9 @@ ggplot(aes(x=tmean, y=PERC)) +
 rain_RR_first
 ```
 
-#### VPD
+## VPD
 
-##### Later period (0-40)
+### Later period (0-40)
 
 ```{r}
 var <- "vpd"
@@ -842,7 +842,7 @@ vpd_RR_second
 
 ```
 
-##### Ealier period (41-85)
+### Ealier period (41-85)
 
 ```{r}
 var <- "vpd"
@@ -939,9 +939,9 @@ library(patchwork)
 #ggsave("fig/RR.png", dpi = 600, width = 12, height = 6)
 ```
 
-### Daily effect
+# Daily effect
 
-#### Temperature
+## Temperature
 
 ```{r}
 library(dlnm)
@@ -1481,7 +1481,7 @@ print(p_heat_diff_tmax)
 ```
 
 
-#### Precipitation
+## Precipitation
 
 ```{r}
 library(dlnm)
@@ -2024,7 +2024,7 @@ p_heat_diff_rain <- ggplot(df_diff, aes(x = lag, y = var_val, fill = SEV_diff_pp
 print(p_heat_diff_rain)
 
 ```
-#### VPD
+## VPD
 
 ```{r}
 library(dlnm)
